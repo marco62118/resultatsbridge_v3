@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "resultatsbridge_v2"
+rootProject.name = "resultatsbridge_v3"
 include(":app")
  
