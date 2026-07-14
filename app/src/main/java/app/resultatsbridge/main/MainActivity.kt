@@ -23,6 +23,7 @@ import app.resultatsbridge.common.URL_SERVEUR_ONLINE
 import app.resultatsbridge.common.utils.getSecurePrefs
 import app.resultatsbridge.organisateur.OrganisateurActivity
 import app.resultatsbridge.organisateur.SaisieDonneCibleActivity
+import app.resultatsbridge.organisateur.TriDuplicationActivity
 import app.resultatsbridge.screens.LoginGlobalScreen
 
 class MainActivity : BaseActivity() {
@@ -238,6 +239,20 @@ private fun ContenuPrincipal() {
                                 .padding(horizontal = 8.dp)
                         ) {
                             Text("🎯 Donnes cibles (duplication)")
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // ── Bouton Tri d'un lot de cartes (aide duplication — V3) ─
+                        OutlinedButton(
+                            onClick = {
+                                context.startActivity(Intent(context, TriDuplicationActivity::class.java))
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp)
+                        ) {
+                            Text("🃏 Trier un lot de cartes")
                         }
                     }
                 }
