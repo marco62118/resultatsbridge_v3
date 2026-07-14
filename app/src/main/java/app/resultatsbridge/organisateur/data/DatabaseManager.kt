@@ -2156,4 +2156,102 @@ object DatabaseManager {
         } catch (e: Exception) { Log.e("DatabaseManager", "❌ attribuerDonnesAuTournoi : ${e.message}", e); -1 }
         finally { try { db.endTransaction() } catch (_: Exception) {}; DatabaseHelper.closeDatabase() }
     }
+
+    // ─────────────────────────────────────────────────────────────────
+    // Donnes cibles (aide à la duplication manuelle — V3)
+    // Réutilise les tables "donnes"/"mains" avec un sentinel dédié
+    // (id_tournoi = -1) distinct de 0 ("avant tournoi") et des vrais
+    // tournois (id_tournoi > 0), pour ne jamais se mélanger avec eux.
+    // ─────────────────────────────────────────────────────────────────
+    private const val ID_TOURNOI_DONNE_CIBLE = -1
+
+    fun sauvegarderDonneCible(context: Context, numeroDonne: Int, mains: List<List<String>>): Boolean {
+        if (mains.size != 4 || !mains.all { it.size == 13 }) return false
+        val db = DatabaseHelper.getDatabase(context)
+        return try {
+            db.beginTransaction()
+            db.rawQuery(
+                "SELECT main_N, main_E, main_S, main_O FROM donnes WHERE id_tournoi = ? AND numero_donne = ? LIMIT 1",
+                arrayOf(ID_TOURNOI_DONNE_CIBLE.toString(), numeroDonne.toString())
+            ).use { c ->
+                if (c.moveToFirst()) {
+                    listOf(0, 1, 2, 3).forEach { col ->
+                        val idMain = c.getLong(col)
+                        if (idMain > 0) db.delete("mains", "ID = ?", arrayOf(idMain.toString()))
+                    }
+                    db.delete("donnes", "id_tournoi = ? AND numero_donne = ?", arrayOf(ID_TOURNOI_DONNE_CIBLE.toString(), numeroDonne.toString()))
+                }
+            }
+            val idsMains = mains.map { main ->
+                val v = ContentValues()
+                main.forEachIndexed { i, carte -> v.put("carte${i + 1}", carte) }
+                db.insert("mains", null, v)
+            }
+            var donneur = "N"; var vulnerable = "P"
+            db.rawQuery("SELECT donneur, vulnerable FROM donnes_d_v WHERE ID_donnes_d_v = ? LIMIT 1", arrayOf(numeroDonne.toString())).use { c ->
+                if (c.moveToFirst()) { donneur = c.getString(0); vulnerable = c.getString(1) }
+            }
+            db.insert("donnes", null, ContentValues().apply {
+                put("id_tournoi", ID_TOURNOI_DONNE_CIBLE)
+                put("numero_donne", numeroDonne); put("donneur", donneur); put("vulnerable", vulnerable)
+                put("main_N", idsMains[0]); put("main_E", idsMains[1]); put("main_S", idsMains[2]); put("main_O", idsMains[3])
+            })
+            db.setTransactionSuccessful()
+            Log.i("DatabaseManager", "✅ sauvegarderDonneCible donne=$numeroDonne")
+            true
+        } catch (e: Exception) { Log.e("DatabaseManager", "❌ sauvegarderDonneCible : ${e.message}", e); false }
+        finally { try { db.endTransaction() } catch (_: Exception) {}; DatabaseHelper.closeDatabase() }
+    }
+
+    fun getDonnesCibles(context: Context): List<DonneAvantTournoi> {
+        val db = DatabaseHelper.getDatabase(context)
+        val result = mutableListOf<DonneAvantTournoi>()
+        return try {
+            db.rawQuery(
+                "SELECT numero_donne, donneur, vulnerable, main_N, main_E, main_S, main_O FROM donnes WHERE id_tournoi = ? ORDER BY numero_donne ASC",
+                arrayOf(ID_TOURNOI_DONNE_CIBLE.toString())
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val numDonne   = c.getInt(0)
+                    val donneur    = c.getString(1) ?: "N"
+                    val vulnerable = c.getString(2) ?: "P"
+                    val mains = (3..6).map { col ->
+                        val idMain = c.getLong(col)
+                        val cartes = mutableListOf<String>()
+                        db.rawQuery("SELECT carte1,carte2,carte3,carte4,carte5,carte6,carte7,carte8,carte9,carte10,carte11,carte12,carte13 FROM mains WHERE ID = ?", arrayOf(idMain.toString())).use { m ->
+                            if (m.moveToFirst()) (0..12).forEach { i -> cartes.add(m.getString(i)) }
+                        }
+                        cartes.toList()
+                    }
+                    result.add(DonneAvantTournoi(numDonne, donneur, vulnerable, mains))
+                }
+            }
+            Log.i("DatabaseManager", "✅ getDonnesCibles → ${result.size} donnes")
+            result
+        } catch (e: Exception) { Log.e("DatabaseManager", "❌ getDonnesCibles : ${e.message}", e); emptyList() }
+        finally { DatabaseHelper.closeDatabase() }
+    }
+
+    fun supprimerDonneCible(context: Context, numeroDonne: Int): Boolean {
+        val db = DatabaseHelper.getDatabase(context)
+        return try {
+            db.beginTransaction()
+            db.rawQuery(
+                "SELECT main_N, main_E, main_S, main_O FROM donnes WHERE id_tournoi = ? AND numero_donne = ?",
+                arrayOf(ID_TOURNOI_DONNE_CIBLE.toString(), numeroDonne.toString())
+            ).use { c ->
+                while (c.moveToNext()) {
+                    listOf(0, 1, 2, 3).forEach { col ->
+                        val idMain = c.getLong(col)
+                        if (idMain > 0) db.delete("mains", "ID = ?", arrayOf(idMain.toString()))
+                    }
+                }
+            }
+            db.delete("donnes", "id_tournoi = ? AND numero_donne = ?", arrayOf(ID_TOURNOI_DONNE_CIBLE.toString(), numeroDonne.toString()))
+            db.setTransactionSuccessful()
+            Log.i("DatabaseManager", "✅ supprimerDonneCible donne=$numeroDonne")
+            true
+        } catch (e: Exception) { Log.e("DatabaseManager", "❌ supprimerDonneCible : ${e.message}", e); false }
+        finally { try { db.endTransaction() } catch (_: Exception) {}; DatabaseHelper.closeDatabase() }
+    }
 }

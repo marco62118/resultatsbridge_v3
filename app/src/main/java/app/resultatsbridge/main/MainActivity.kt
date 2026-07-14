@@ -22,6 +22,7 @@ import app.resultatsbridge.common.AppScaffold
 import app.resultatsbridge.common.URL_SERVEUR_ONLINE
 import app.resultatsbridge.common.utils.getSecurePrefs
 import app.resultatsbridge.organisateur.OrganisateurActivity
+import app.resultatsbridge.organisateur.SaisieDonneCibleActivity
 import app.resultatsbridge.screens.LoginGlobalScreen
 
 class MainActivity : BaseActivity() {
@@ -221,6 +222,22 @@ private fun ContenuPrincipal() {
                                 .padding(horizontal = 8.dp)
                         ) {
                             Text("👔 Organisateur")
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // ── Bouton Donnes cibles (aide duplication — V3) ─
+                        OutlinedButton(
+                            onClick = {
+                                context.startActivity(Intent(context, SaisieDonneCibleActivity::class.java))
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp)
+                        ) {
+                            Text("🎯 Donnes cibles (duplication)")
                         }
                     }
                 }
