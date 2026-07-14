@@ -4,8 +4,11 @@
 // et stockage séparé (DatabaseManager.sauvegarderDonneCible, sentinel dédié).
 package app.resultatsbridge.organisateur
 
+import android.net.Uri
 import android.os.Bundle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -28,10 +31,13 @@ import app.resultatsbridge.common.AppScaffold
 import app.resultatsbridge.common.model.Carte
 import app.resultatsbridge.common.model.DonneAvantTournoi
 import app.resultatsbridge.common.theme.BridgeServeurTheme
+import app.resultatsbridge.common.utils.PbnParser
 import app.resultatsbridge.organisateur.data.DatabaseManager
 import app.resultatsbridge.screens.AffichageMainsLectureScreen
 import app.resultatsbridge.screens.AffichageMainsScreen
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SaisieDonneCibleActivity : BaseActivity() {
 
@@ -54,6 +60,38 @@ class SaisieDonneCibleActivity : BaseActivity() {
                         donnes = DatabaseManager.getDonnesCibles(this@SaisieDonneCibleActivity)
                         isLoading = false
                     }
+                }
+
+                fun importerPbn(uri: Uri) {
+                    scope.launch {
+                        message = ""
+                        try {
+                            val texte = withContext(Dispatchers.IO) {
+                                contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
+                                    ?: throw PbnParser.PbnParseException("Impossible de lire le fichier")
+                            }
+                            val donnesLues = PbnParser.parse(texte)
+                            if (donnesLues.isEmpty()) {
+                                message = "❌ Aucune donne trouvée dans ce fichier PBN"
+                            } else {
+                                donnesLues.forEach { donne ->
+                                    DatabaseManager.sauvegarderDonneCible(
+                                        this@SaisieDonneCibleActivity, donne.numeroDonne, donne.mains
+                                    )
+                                }
+                                message = "✅ ${donnesLues.size} donne(s) importée(s) depuis le PBN"
+                                chargerDonnes()
+                            }
+                        } catch (e: PbnParser.PbnParseException) {
+                            message = "❌ Fichier PBN invalide : ${e.message}"
+                        } catch (e: Exception) {
+                            message = "❌ Erreur import PBN : ${e.message}"
+                        }
+                    }
+                }
+
+                val importPbnLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+                    uri?.let { importerPbn(it) }
                 }
 
                 LaunchedEffect(Unit) { chargerDonnes() }
@@ -140,6 +178,13 @@ class SaisieDonneCibleActivity : BaseActivity() {
                                 }
                             }) { Text("Saisir") }
                         }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        OutlinedButton(
+                            onClick = { importPbnLauncher.launch("*/*") },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("📄 Importer depuis un fichier PBN") }
 
                         Spacer(modifier = Modifier.height(10.dp))
 
