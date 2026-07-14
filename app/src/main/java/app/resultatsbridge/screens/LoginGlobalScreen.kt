@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -23,6 +24,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.resultatsbridge.client.ClientNetworkUtils
 import app.resultatsbridge.common.URL_SERVEUR_ONLINE
+import app.resultatsbridge.common.theme.ChampTextStyle
+import app.resultatsbridge.common.theme.champColors
 import app.resultatsbridge.common.utils.getSecurePrefs
 import kotlinx.coroutines.launch
 
@@ -102,7 +105,9 @@ private fun EcranConnexion(
         OutlinedTextField(
             value = emailInput,
             onValueChange = { emailInput = it; messageErreur = null },
-            label = { Text("Votre email") },
+            label = { Text("Votre email", fontWeight = FontWeight.Bold) },
+            textStyle = ChampTextStyle,
+            colors = champColors(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
@@ -111,7 +116,9 @@ private fun EcranConnexion(
         OutlinedTextField(
             value = mdpInput,
             onValueChange = { mdpInput = it; messageErreur = null },
-            label = { Text("Mot de passe") },
+            label = { Text("Mot de passe", fontWeight = FontWeight.Bold) },
+            textStyle = ChampTextStyle,
+            colors = champColors(),
             visualTransformation = if (mdpVisible) VisualTransformation.None else PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             trailingIcon = {
@@ -224,7 +231,9 @@ private fun EcranInscription(
         OutlinedTextField(
             value = prenom,
             onValueChange = { prenom = it; messageErreur = null },
-            label = { Text("Prénom") },
+            label = { Text("Prénom", fontWeight = FontWeight.Bold) },
+            textStyle = ChampTextStyle,
+            colors = champColors(),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
         )
@@ -232,7 +241,9 @@ private fun EcranInscription(
         OutlinedTextField(
             value = nom,
             onValueChange = { nom = it; messageErreur = null },
-            label = { Text("Nom") },
+            label = { Text("Nom", fontWeight = FontWeight.Bold) },
+            textStyle = ChampTextStyle,
+            colors = champColors(),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
         )
@@ -240,7 +251,9 @@ private fun EcranInscription(
         OutlinedTextField(
             value = emailInput,
             onValueChange = { emailInput = it; messageErreur = null },
-            label = { Text("Email") },
+            label = { Text("Email", fontWeight = FontWeight.Bold) },
+            textStyle = ChampTextStyle,
+            colors = champColors(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
@@ -249,7 +262,9 @@ private fun EcranInscription(
         OutlinedTextField(
             value = mdpInput,
             onValueChange = { mdpInput = it; messageErreur = null },
-            label = { Text("Mot de passe (6 caractères minimum)") },
+            label = { Text("Mot de passe (6 caractères minimum)", fontWeight = FontWeight.Bold) },
+            textStyle = ChampTextStyle,
+            colors = champColors(),
             visualTransformation = if (mdpVisible) VisualTransformation.None else PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             trailingIcon = {
@@ -267,7 +282,9 @@ private fun EcranInscription(
         OutlinedTextField(
             value = codeInput,
             onValueChange = { codeInput = it.uppercase(); messageErreur = null },
-            label = { Text("Code du club") },
+            label = { Text("Code du club", fontWeight = FontWeight.Bold) },
+            textStyle = ChampTextStyle,
+            colors = champColors(),
             modifier = Modifier.fillMaxWidth(),
             singleLine = true
         )

@@ -24,6 +24,8 @@ import app.resultatsbridge.common.AppScaffold
 import app.resultatsbridge.common.model.Carte
 import app.resultatsbridge.common.model.DonneAvantTournoi
 import app.resultatsbridge.common.theme.BridgeServeurTheme
+import app.resultatsbridge.common.theme.ChampTextStyle
+import app.resultatsbridge.common.theme.champColors
 import app.resultatsbridge.client.ClientNetworkUtils
 import app.resultatsbridge.organisateur.data.DatabaseManager
 import app.resultatsbridge.screens.AffichageMainsBatchScreen
@@ -132,7 +134,8 @@ class SaisieDonnesAvantTournoiActivity : BaseActivity() {
                             OutlinedTextField(
                                 value = numeroDonneSaisie,
                                 onValueChange = { numeroDonneSaisie = it.filter { c -> c.isDigit() } },
-                                label = { Text("N° de donne à saisir", color = Color.Black) },
+                                label = { Text("N° de donne à saisir", fontWeight = FontWeight.Bold) },
+                                textStyle = ChampTextStyle,
                                 keyboardOptions = KeyboardOptions(
                                     keyboardType = KeyboardType.Number,
                                     imeAction = ImeAction.Done
@@ -148,15 +151,7 @@ class SaisieDonnesAvantTournoiActivity : BaseActivity() {
                                 }),
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor   = Color.White,
-                                    unfocusedBorderColor = Color.White,
-                                    focusedLabelColor    = Color.Black,
-                                    unfocusedLabelColor  = Color.Black,
-                                    focusedTextColor     = Color.Black,
-                                    unfocusedTextColor   = Color.Black,
-                                    cursorColor          = Color.Black
-                                )
+                                colors = champColors()
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Box {

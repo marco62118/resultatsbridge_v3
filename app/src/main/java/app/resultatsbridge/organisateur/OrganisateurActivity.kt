@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -30,6 +31,8 @@ import app.resultatsbridge.common.utils.getSecurePrefs
 import app.resultatsbridge.main.BaseActivity
 import app.resultatsbridge.common.AppScaffold
 import app.resultatsbridge.common.theme.BridgeServeurTheme
+import app.resultatsbridge.common.theme.ChampTextStyle
+import app.resultatsbridge.common.theme.champColors
 import app.resultatsbridge.organisateur.data.DatabaseManager
 import app.resultatsbridge.common.model.Joueur
 import app.resultatsbridge.organisateur.data.DatabaseHelper
@@ -360,7 +363,9 @@ class OrganisateurActivity : BaseActivity() {
                                             OutlinedTextField(
                                                 value = emailExport,
                                                 onValueChange = { emailExport = it },
-                                                label = { Text("Email") },
+                                                label = { Text("Email", fontWeight = FontWeight.Bold) },
+                                                textStyle = ChampTextStyle,
+                                                colors = champColors(),
                                                 modifier = Modifier.fillMaxWidth(),
                                                 singleLine = true
                                             )
@@ -369,7 +374,9 @@ class OrganisateurActivity : BaseActivity() {
                                             OutlinedTextField(
                                                 value = mdpExport,
                                                 onValueChange = { mdpExport = it },
-                                                label = { Text("Mot de passe") },
+                                                label = { Text("Mot de passe", fontWeight = FontWeight.Bold) },
+                                                textStyle = ChampTextStyle,
+                                                colors = champColors(),
                                                 visualTransformation = if (mdpExportVisible) VisualTransformation.None else PasswordVisualTransformation(),
                                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                                                 trailingIcon = {
@@ -610,7 +617,9 @@ class OrganisateurActivity : BaseActivity() {
                                 OutlinedTextField(
                                     value = emailInput,
                                     onValueChange = { emailInput = it; messageErreur = null },
-                                    label = { Text("Email de l'association") },
+                                    label = { Text("Email de l'association", fontWeight = FontWeight.Bold) },
+                                    textStyle = ChampTextStyle,
+                                    colors = champColors(),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                                     modifier = Modifier.fillMaxWidth(), singleLine = true
                                 )
@@ -619,7 +628,9 @@ class OrganisateurActivity : BaseActivity() {
                                 OutlinedTextField(
                                     value = mdpInput,
                                     onValueChange = { mdpInput = it; messageErreur = null },
-                                    label = { Text("Mot de passe") },
+                                    label = { Text("Mot de passe", fontWeight = FontWeight.Bold) },
+                                    textStyle = ChampTextStyle,
+                                    colors = champColors(),
                                     visualTransformation = if (mdpVisible) VisualTransformation.None else PasswordVisualTransformation(),
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                                     trailingIcon = {
@@ -762,8 +773,10 @@ class OrganisateurActivity : BaseActivity() {
                                             OutlinedTextField(
                                                 value = nouveauCode,
                                                 onValueChange = { nouveauCode = it.uppercase() },
-                                                label = { Text("Nouveau code") },
+                                                label = { Text("Nouveau code", fontWeight = FontWeight.Bold) },
                                                 placeholder = { Text("Ex: EMBRUN25") },
+                                                textStyle = ChampTextStyle,
+                                                colors = champColors(),
                                                 modifier = Modifier.fillMaxWidth(),
                                                 singleLine = true
                                             )

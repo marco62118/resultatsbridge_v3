@@ -13,14 +13,20 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import app.resultatsbridge.common.theme.ChampTextStyle
+import app.resultatsbridge.common.theme.champColors
 import app.resultatsbridge.common.utils.getSecurePrefs
 import app.resultatsbridge.client.ClientNetworkUtils
 import app.resultatsbridge.common.model.Equipe
@@ -109,7 +115,9 @@ fun ConnexionScreen(
             OutlinedTextField(
                 value = emailInput,
                 onValueChange = { emailInput = it; messageErreur = null },
-                label = { Text("Votre email") },
+                label = { Text("Votre email", fontWeight = FontWeight.Bold) },
+                textStyle = ChampTextStyle,
+                colors = champColors(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
@@ -118,7 +126,9 @@ fun ConnexionScreen(
             OutlinedTextField(
                 value = mdpInput,
                 onValueChange = { mdpInput = it; messageErreur = null },
-                label = { Text("Mot de passe") },
+                label = { Text("Mot de passe", fontWeight = FontWeight.Bold) },
+                textStyle = ChampTextStyle,
+                colors = champColors(),
                 visualTransformation = if (mdpVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 trailingIcon = {
@@ -145,26 +155,30 @@ fun ConnexionScreen(
                 Text("Ouvrir les paramètres Wi-Fi")
             }
             Spacer(Modifier.height(16.dp))
-            ExposedDropdownMenuBox(
-                expanded = expanded,
-                onExpandedChange = { expanded = !expanded }
-            ) {
+            // Pas ExposedDropdownMenuBox : sur un champ éditable, ça ouvre la liste dès qu'on
+            // touche le champ pour placer le curseur, ce qui empêche de corriger l'adresse
+            // tranquillement. Le menu ne s'ouvre plus qu'en cliquant explicitement la flèche.
+            Box(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
                     value = ipInput,
                     onValueChange = { ipInput = it },
-                    label = { Text("Adresse IP du serveur") },
-                    modifier = Modifier.menuAnchor().fillMaxWidth(),
+                    label = { Text("Adresse IP du serveur", fontWeight = FontWeight.Bold) },
+                    textStyle = ChampTextStyle,
+                    colors = champColors(),
+                    modifier = Modifier.fillMaxWidth(),
                     trailingIcon = {
-                        ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+                        IconButton(onClick = { expanded = true }) {
+                            Icon(Icons.Filled.ArrowDropDown, contentDescription = "Adresses IP enregistrées")
+                        }
                     }
                 )
-                ExposedDropdownMenu(
+                DropdownMenu(
                     expanded = expanded,
                     onDismissRequest = { expanded = false }
                 ) {
                     savedIps.forEach { ip ->
                         DropdownMenuItem(
-                            text = { Text(ip) },
+                            text = { Text(ip, fontSize = 18.sp, color = Color.Black, fontWeight = FontWeight.Bold) },
                             onClick = { ipInput = ip; expanded = false }
                         )
                     }

@@ -31,6 +31,8 @@ import app.resultatsbridge.common.AppScaffold
 import app.resultatsbridge.common.model.Carte
 import app.resultatsbridge.common.model.DonneAvantTournoi
 import app.resultatsbridge.common.theme.BridgeServeurTheme
+import app.resultatsbridge.common.theme.ChampTextStyle
+import app.resultatsbridge.common.theme.champColors
 import app.resultatsbridge.common.utils.PbnParser
 import app.resultatsbridge.organisateur.data.DatabaseManager
 import app.resultatsbridge.screens.AffichageMainsLectureScreen
@@ -152,7 +154,9 @@ class SaisieDonneCibleActivity : BaseActivity() {
                             OutlinedTextField(
                                 value = numeroDonneSaisie,
                                 onValueChange = { numeroDonneSaisie = it.filter { c -> c.isDigit() } },
-                                label = { Text("N° de donne à saisir") },
+                                label = { Text("N° de donne à saisir", fontWeight = FontWeight.Bold) },
+                                textStyle = ChampTextStyle,
+                                colors = champColors(),
                                 keyboardOptions = KeyboardOptions(
                                     keyboardType = KeyboardType.Number,
                                     imeAction = ImeAction.Done

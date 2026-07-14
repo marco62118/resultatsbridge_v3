@@ -15,7 +15,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import app.resultatsbridge.common.theme.ChampTextStyle
+import app.resultatsbridge.common.theme.champColors
 import androidx.compose.ui.unit.dp
 import app.resultatsbridge.client.ClientNetworkUtils
 import app.resultatsbridge.common.utils.getSecurePrefs
@@ -246,7 +250,9 @@ fun ConstitutionEquipesScreen(
                     OutlinedTextField(
                         value         = nouveauPrenom,
                         onValueChange = { nouveauPrenom = it },
-                        label         = { Text("Prénom") },
+                        label         = { Text("Prénom", fontWeight = FontWeight.Bold) },
+                        textStyle     = ChampTextStyle,
+                        colors        = champColors(),
                         modifier      = Modifier.fillMaxWidth(),
                         singleLine    = true
                     )
@@ -254,7 +260,9 @@ fun ConstitutionEquipesScreen(
                     OutlinedTextField(
                         value         = nouveauNom,
                         onValueChange = { nouveauNom = it },
-                        label         = { Text("Nom") },
+                        label         = { Text("Nom", fontWeight = FontWeight.Bold) },
+                        textStyle     = ChampTextStyle,
+                        colors        = champColors(),
                         modifier      = Modifier.fillMaxWidth(),
                         singleLine    = true
                     )
@@ -528,12 +536,14 @@ fun JoueurCard(joueur: Joueur, onClick: (() -> Unit)? = null) {
             .fillMaxWidth()
             .padding(vertical = 4.dp)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
+        colors    = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Text(
             text     = "${joueur.prenom} ${joueur.nom}",
             modifier = Modifier.padding(vertical = 12.dp, horizontal = 4.dp),
-            style    = MaterialTheme.typography.bodyLarge
+            style    = MaterialTheme.typography.bodyLarge,
+            color    = Color.Black
         )
     }
 }

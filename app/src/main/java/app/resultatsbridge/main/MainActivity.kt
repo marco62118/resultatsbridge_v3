@@ -13,17 +13,24 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.resultatsbridge.client.ClientActivity
 import app.resultatsbridge.client.ClientNetworkUtils
 import app.resultatsbridge.common.AppScaffold
-import app.resultatsbridge.common.URL_SERVEUR_ONLINE
+import app.resultatsbridge.common.theme.BordureNonSelectionnee
+import app.resultatsbridge.common.theme.BordureSelectionnee
+import app.resultatsbridge.common.theme.CouleurNonSelectionnee
+import app.resultatsbridge.common.theme.CouleurSelectionnee
+import app.resultatsbridge.common.theme.TexteNonSelectionne
+import app.resultatsbridge.common.theme.TexteSelectionne
 import app.resultatsbridge.common.utils.getSecurePrefs
 import app.resultatsbridge.organisateur.OrganisateurActivity
-import app.resultatsbridge.organisateur.SaisieDonneCibleActivity
-import app.resultatsbridge.organisateur.TriDuplicationActivity
+import app.resultatsbridge.organisateur.PreparationTournoiPreetabliActivity
 import app.resultatsbridge.screens.LoginGlobalScreen
 
 class MainActivity : BaseActivity() {
@@ -77,13 +84,9 @@ private fun ContenuPrincipal() {
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
 
-                        // ── Mode de saisie : 3 boutons côte à côte ──────
-                        Text(
-                            "Mode de saisie :",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-
+                        // ── Mode de saisie : 2 boutons côte à côte ──────
+                        // Fond vert d'origine conservé (pas de remplissage) : seul le cadre
+                        // (bordure) marque la sélection, en blanc pur — pas un fond blanc.
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -97,11 +100,8 @@ private fun ContenuPrincipal() {
                                     modifier = Modifier
                                         .weight(1f)
                                         .border(
-                                            width = if (selected) 2.dp else 1.dp,
-                                            color = if (selected)
-                                                MaterialTheme.colorScheme.primary
-                                            else
-                                                MaterialTheme.colorScheme.outline,
+                                            width = if (selected) BordureSelectionnee else BordureNonSelectionnee,
+                                            color = if (selected) CouleurSelectionnee else CouleurNonSelectionnee,
                                             shape = RoundedCornerShape(8.dp)
                                         )
                                         .clickable { modeJeu = valeur }
@@ -116,7 +116,9 @@ private fun ContenuPrincipal() {
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text      = label,
-                                        style     = MaterialTheme.typography.bodySmall,
+                                        fontSize  = 20.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color     = if (selected) TexteSelectionne else TexteNonSelectionne,
                                         textAlign = TextAlign.Center
                                     )
                                 }
@@ -128,12 +130,6 @@ private fun ContenuPrincipal() {
                         Spacer(modifier = Modifier.height(12.dp))
 
                         // ── Mode connexion : 2 boutons côte à côte ──────
-                        Text(
-                            "Mode connexion :",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -147,11 +143,8 @@ private fun ContenuPrincipal() {
                                     modifier = Modifier
                                         .weight(1f)
                                         .border(
-                                            width = if (selected) 2.dp else 1.dp,
-                                            color = if (selected)
-                                                MaterialTheme.colorScheme.primary
-                                            else
-                                                MaterialTheme.colorScheme.outline,
+                                            width = if (selected) BordureSelectionnee else BordureNonSelectionnee,
+                                            color = if (selected) CouleurSelectionnee else CouleurNonSelectionnee,
                                             shape = RoundedCornerShape(8.dp)
                                         )
                                         .clickable { modeOnline = valeur }
@@ -166,24 +159,14 @@ private fun ContenuPrincipal() {
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
                                         text      = label,
-                                        style     = MaterialTheme.typography.bodyMedium,
+                                        fontSize  = 20.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color     = if (selected) TexteSelectionne else TexteNonSelectionne,
                                         textAlign = TextAlign.Center
                                     )
                                 }
                             }
                         }
-
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        // ✅ Adresse sélectionnée en dessous
-                        Text(
-                            text  = if (modeOnline) URL_SERVEUR_ONLINE else "Serveur local Wi-Fi",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (modeOnline) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.secondary,
-                            textAlign = TextAlign.Center,
-                            modifier  = Modifier.fillMaxWidth()
-                        )
 
                         Spacer(modifier = Modifier.height(12.dp))
                         HorizontalDivider()
@@ -229,30 +212,17 @@ private fun ContenuPrincipal() {
                         HorizontalDivider()
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // ── Bouton Donnes cibles (aide duplication — V3) ─
+                        // ── Bouton Préparation d'un tournoi préétabli (aide duplication — V3) ─
                         OutlinedButton(
                             onClick = {
-                                context.startActivity(Intent(context, SaisieDonneCibleActivity::class.java))
+                                context.startActivity(Intent(context, PreparationTournoiPreetabliActivity::class.java))
                             },
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.Black),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 8.dp)
                         ) {
-                            Text("🎯 Donnes cibles (duplication)")
-                        }
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // ── Bouton Tri d'un lot de cartes (aide duplication — V3) ─
-                        OutlinedButton(
-                            onClick = {
-                                context.startActivity(Intent(context, TriDuplicationActivity::class.java))
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp)
-                        ) {
-                            Text("🃏 Trier un lot de cartes")
+                            Text("📋 Préparation d'un tournoi préétabli", fontWeight = FontWeight.Bold)
                         }
                     }
                 }

@@ -12,11 +12,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.resultatsbridge.main.BaseActivity
 import app.resultatsbridge.common.AppScaffold
 import app.resultatsbridge.common.theme.BridgeServeurTheme
+import app.resultatsbridge.common.theme.ChampTextStyle
+import app.resultatsbridge.common.theme.champColors
 import app.resultatsbridge.organisateur.data.DatabaseManager
 import app.resultatsbridge.client.ClientNetworkUtils
 import app.resultatsbridge.common.model.CreationTournoiResult
@@ -240,10 +243,8 @@ class CreationTournoiActivity : BaseActivity() {
                                     trailingIcon = {
                                         ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
                                     },
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        focusedContainerColor = Color.White,
-                                        unfocusedContainerColor = Color.White
-                                    ),
+                                    textStyle = ChampTextStyle,
+                                    colors = champColors(),
                                     modifier = Modifier.menuAnchor().fillMaxWidth()
                                 )
                                 ExposedDropdownMenu(
@@ -288,7 +289,9 @@ class CreationTournoiActivity : BaseActivity() {
                                                 nbreDonnesParTableSaisie =
                                                     it.filter { c -> c.isDigit() }
                                             },
-                                            label = { Text("Donnes par table (ex: 4)") },
+                                            label = { Text("Donnes par table (ex: 4)", fontWeight = FontWeight.Bold) },
+                                            textStyle = ChampTextStyle,
+                                            colors = champColors(),
                                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                                             singleLine = true,
                                             modifier = Modifier.fillMaxWidth()

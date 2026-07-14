@@ -11,6 +11,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
 private val DarkColorScheme = darkColorScheme(
@@ -47,8 +48,8 @@ fun BridgeServeurTheme(
         content = {
             CompositionLocalProvider(
                 LocalTextSelectionColors provides TextSelectionColors(
-//                    handleColor = Color.Transparent,
-                    handleColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.5f),
+                    // Poignée violette inutile : le curseur noir clignotant suffit déjà (15/07/2026)
+                    handleColor = Color.Transparent,
                     backgroundColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
                 )
             ) {
