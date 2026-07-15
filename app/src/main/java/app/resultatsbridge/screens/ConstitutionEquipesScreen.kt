@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -71,13 +72,99 @@ fun ConstitutionEquipesScreen(
     var joueur1         by remember { mutableStateOf<Joueur?>(null) }
     var joueur2         by remember { mutableStateOf<Joueur?>(null) }
     var equipes         by remember { mutableStateOf<List<Equipe>>(emptyList()) }
-    var numeroEquipe    by remember { mutableStateOf(1) }
+    // Numéro de la prochaine équipe à créer : le plus petit numéro pas encore utilisé.
+    // Réutilise automatiquement un numéro libéré par une suppression, sans jamais
+    // renuméroter les équipes déjà constituées (elles gardent leur table/position).
+    val numeroEquipe by remember {
+        derivedStateOf {
+            val utilises = equipes.map { it.equipeNumero }.toSet()
+            var n = 1
+            while (utilises.contains(n)) n++
+            n
+        }
+    }
     var afficherEquipes by remember { mutableStateOf(false) }
     var nouveauNom      by remember { mutableStateOf("") }
     var nouveauPrenom   by remember { mutableStateOf("") }
     var messageParite   by remember { mutableStateOf<String?>(null) }
     var importEnCours   by remember { mutableStateOf(false) }
     var msgImport       by remember { mutableStateOf<String?>(null) }
+    var equipeASupprimer by remember { mutableStateOf<Equipe?>(null) }
+
+    // Supprime une équipe déjà constituée : ses 2 joueurs retournent dans le pool,
+    // les autres équipes ne bougent pas (leur numéro est conservé). Le numéro libéré
+    // sera repris automatiquement par la prochaine équipe créée (cf. numeroEquipe ci-dessus).
+    val supprimerEquipe: (Equipe) -> Unit = { equipe ->
+        joueursDispo.add(equipe.joueur1)
+        joueursDispo.add(equipe.joueur2)
+        val sortedList = joueursDispo.sortedBy { it.prenom.lowercase() }
+        joueursDispo.clear()
+        joueursDispo.addAll(sortedList)
+
+        equipes = equipes.filter { it.equipeNumero != equipe.equipeNumero }
+
+        messageParite   = null
+        afficherEquipes = false
+        Log.i("ConstitutionEquipes", "🗑️ Équipe ${equipe.equipeNumero} supprimée, joueurs remis dans le pool, numéro libéré")
+    }
+
+    // Remplace un seul joueur (1 ou 2) d'une équipe déjà constituée : le joueur gardé
+    // est préchargé dans le panneau de sélection, l'autre retourne dans le pool.
+    // L'équipe garde son numéro (même mécanisme de réutilisation que supprimerEquipe).
+    val remplacerJoueur: (Equipe, Int) -> Unit = { equipe, numJoueur ->
+        val joueurGarde    = if (numJoueur == 1) equipe.joueur2 else equipe.joueur1
+        val joueurRemplace = if (numJoueur == 1) equipe.joueur1 else equipe.joueur2
+
+        joueursDispo.add(joueurRemplace)
+        val sortedList = joueursDispo.sortedBy { it.prenom.lowercase() }
+        joueursDispo.clear()
+        joueursDispo.addAll(sortedList)
+
+        equipes = equipes.filter { it.equipeNumero != equipe.equipeNumero }
+
+        joueur1         = joueurGarde
+        joueur2         = null
+        messageParite   = null
+        afficherEquipes = false
+        Log.i("ConstitutionEquipes", "✏️ Équipe ${equipe.equipeNumero} : remplacement de ${joueurRemplace.prenom}")
+    }
+
+    // Intervertit les numéros de 2 équipes (utilisé par les flèches ▲▼ du récapitulatif) :
+    // ni les joueurs ni le pool ne bougent, seuls les 2 numéros — et donc les
+    // positions/tables Mitchell qui en découlent — sont échangés.
+    val intervertirEquipes: (Equipe, Equipe) -> Unit = { a, b ->
+        equipes = equipes.map {
+            when (it.equipeNumero) {
+                a.equipeNumero -> it.copy(equipeNumero = b.equipeNumero)
+                b.equipeNumero -> it.copy(equipeNumero = a.equipeNumero)
+                else           -> it
+            }
+        }.sortedBy { it.equipeNumero }
+        Log.i("ConstitutionEquipes", "🔀 Équipes ${a.equipeNumero} et ${b.equipeNumero} interverties")
+    }
+
+    equipeASupprimer?.let { equipe ->
+        AlertDialog(
+            onDismissRequest = { equipeASupprimer = null },
+            title   = { Text("Supprimer l'équipe n°${equipe.equipeNumero} ?") },
+            text    = {
+                Text(
+                    "${equipe.joueur1.prenom} ${equipe.joueur1.nom} et " +
+                            "${equipe.joueur2.prenom} ${equipe.joueur2.nom} " +
+                            "retourneront dans la liste des joueurs disponibles."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    supprimerEquipe(equipe)
+                    equipeASupprimer = null
+                }) { Text("Supprimer") }
+            },
+            dismissButton = {
+                TextButton(onClick = { equipeASupprimer = null }) { Text("Annuler") }
+            }
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize().padding(vertical = 16.dp)) {
 
@@ -183,12 +270,11 @@ fun ConstitutionEquipesScreen(
                                     joueur2 = joueur2!!,
                                     idTournoi = idTournoi
                                 )
-                                equipes       = equipes + equipe
+                                equipes       = (equipes + equipe).sortedBy { it.equipeNumero }
                                 messageParite = null
                                 Log.i("ConstitutionEquipes", "✅ Équipe $numeroEquipe validée")
                                 joueur1      = null
                                 joueur2      = null
-                                numeroEquipe++
                                 if (!estMitchell && equipes.size == nombreEquipes) {
                                     afficherEquipes = true
                                     Log.i("ConstitutionEquipes", "🎯 Fin constitution Howell")
@@ -205,11 +291,19 @@ fun ConstitutionEquipesScreen(
                         Spacer(Modifier.height(12.dp))
                         Button(
                             onClick = {
+                                val numerosManquants = (1..equipes.size).filter { n ->
+                                    equipes.none { it.equipeNumero == n }
+                                }
                                 if (equipes.size % 2 != 0) {
                                     messageParite =
                                         "⚠️ Nombre d'équipes impair (${equipes.size}).\n" +
                                                 "Ajoutez une équipe Relais pour avoir un nombre pair."
                                     Log.w("ConstitutionEquipes", "⚠️ Nombre impair : ${equipes.size} équipes")
+                                } else if (numerosManquants.isNotEmpty()) {
+                                    messageParite =
+                                        "⚠️ Numéro(s) d'équipe manquant(s) : ${numerosManquants.joinToString(", ")}.\n" +
+                                                "Complétez ces équipes avant de continuer."
+                                    Log.w("ConstitutionEquipes", "⚠️ Numéros manquants : $numerosManquants")
                                 } else {
                                     messageParite   = null
                                     afficherEquipes = true
@@ -430,12 +524,17 @@ fun ConstitutionEquipesScreen(
                 }
 
                 item { Log.i("ConstitutionEquipes", "📋 Affichage des équipes") }
-                items(equipes) { equipe ->
+                itemsIndexed(equipes) { index, equipe ->
                     val pos = positions[equipe.equipeNumero]
                     EquipeItem(
                         equipe              = equipe,
                         orientationMitchell = pos?.first,
-                        tableMitchell       = pos?.second
+                        tableMitchell       = pos?.second,
+                        onSupprimer         = { equipeASupprimer = equipe },
+                        onRemplacerJoueur   = { numJoueur -> remplacerJoueur(equipe, numJoueur) },
+                        afficherFleches     = true,
+                        onMonter            = if (index > 0) { { intervertirEquipes(equipe, equipes[index - 1]) } } else null,
+                        onDescendre         = if (index < equipes.size - 1) { { intervertirEquipes(equipe, equipes[index + 1]) } } else null
                     )
                 }
 
