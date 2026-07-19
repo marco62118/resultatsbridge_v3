@@ -17,18 +17,12 @@
 
     <!--
         Serveur local embarqué (NanoHTTPD port 8080 — HTTP simple, pas de SSL).
-        Le HTTP en clair est autorisé uniquement pour les plages d'IP privées
-        utilisées sur un réseau local (LAN du tournoi).
+        <domain> ne peut pas exprimer une plage d'IP (ex. 192.168.0.0/16) : ça
+        matche un nom d'hôte exact, jamais une IP dynamique reelle du LAN
+        (192.168.0.158, 192.168.43.1, ...). La seule solution est d'autoriser
+        le HTTP en clair par défaut - seul cas d'usage reel dans l'appli, le
+        serveur en ligne utilise toujours https:// explicitement ci-dessus.
     -->
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">localhost</domain>
-        <domain includeSubdomains="true">127.0.0.1</domain>
-        <domain includeSubdomains="true">10.0.0.0</domain>
-        <domain includeSubdomains="true">172.16.0.0</domain>
-        <domain includeSubdomains="true">192.168.0.0</domain>
-    </domain-config>
-
-    <!-- Par défaut : HTTP clair interdit, SSL obligatoire -->
-    <base-config cleartextTrafficPermitted="false"/>
+    <base-config cleartextTrafficPermitted="true"/>
 
 </network-security-config>
