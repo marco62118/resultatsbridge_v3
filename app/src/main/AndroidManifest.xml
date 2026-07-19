@@ -33,6 +33,7 @@
         <activity android:name=".organisateur.CreationTournoiActivity" />
         <activity android:name=".organisateur.SaisieDonnesAvantTournoiActivity" />
         <activity android:name=".organisateur.SaisieDonneCibleActivity" />
+        <activity android:name=".organisateur.SaisieManuelleDonneeActivity" />
         <activity android:name=".organisateur.TriDuplicationActivity" />
         <activity android:name=".organisateur.PreparationTournoiPreetabliActivity" />
         <activity android:name=".organisateur.ParticipationOrganisateurActivity" />

@@ -71,6 +71,7 @@ fun TextSuites(
     modifier: Modifier = Modifier,
     color: Color = Color.Unspecified,
     fontSize: TextUnit = 14.sp,
+    symbolFontSize: TextUnit = fontSize, // taille des icônes ♠♥♦♣ (indépendante du texte)
     fontWeight: FontWeight? = null,
     textAlign: TextAlign? = null,
     maxLines: Int = Int.MAX_VALUE
@@ -89,7 +90,7 @@ fun TextSuites(
 
     val inlineContent = mapOf(
         INLINE_PIQUE to InlineTextContent(
-            Placeholder(fontSize, fontSize, PlaceholderVerticalAlign.TextCenter)
+            Placeholder(symbolFontSize, symbolFontSize, PlaceholderVerticalAlign.TextCenter)
         ) {
             Image(
                 painter = painterResource(R.drawable.ic_pique),
@@ -99,7 +100,7 @@ fun TextSuites(
             )
         },
         INLINE_TREFLE to InlineTextContent(
-            Placeholder(fontSize, fontSize, PlaceholderVerticalAlign.TextCenter)
+            Placeholder(symbolFontSize, symbolFontSize, PlaceholderVerticalAlign.TextCenter)
         ) {
             Image(
                 painter = painterResource(R.drawable.ic_trefle),
@@ -109,7 +110,7 @@ fun TextSuites(
             )
         },
         INLINE_COEUR to InlineTextContent(
-            Placeholder(fontSize, fontSize, PlaceholderVerticalAlign.TextCenter)
+            Placeholder(symbolFontSize, symbolFontSize, PlaceholderVerticalAlign.TextCenter)
         ) {
             Image(
                 painter = painterResource(R.drawable.ic_coeur),
@@ -119,7 +120,7 @@ fun TextSuites(
             )
         },
         INLINE_CARREAU to InlineTextContent(
-            Placeholder(fontSize, fontSize, PlaceholderVerticalAlign.TextCenter)
+            Placeholder(symbolFontSize, symbolFontSize, PlaceholderVerticalAlign.TextCenter)
         ) {
             Image(
                 painter = painterResource(R.drawable.ic_carreau),

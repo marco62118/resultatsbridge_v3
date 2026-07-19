@@ -14,7 +14,7 @@ data class Mouvement(
     val joueur2EONom: String,
     val joueur2EOPrenom: String,
     val donnes: List<DonneDetail>,// liste des donnes avec leur détal dans la classe Donne Detail
-    val indexDonneAJouer: Int // index de la donne à Jouer dans le mouvement
-
-
+    val indexDonneAJouer: Int, // index de la donne à Jouer dans le mouvement
+    val equipeNSDefaillante: Boolean = false, // équipe NS déclarée défaillante par l'organisateur
+    val equipeEODefaillante: Boolean = false  // équipe EO déclarée défaillante par l'organisateur
 )

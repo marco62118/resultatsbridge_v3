@@ -124,6 +124,18 @@ class ClientActivity : BaseActivity() {
                 val coroutineScope = rememberCoroutineScope()
                 val context = this@ClientActivity
 
+                // ── Code arbitre (tournois locaux uniquement, pas en mode online) ──
+                var codeArbitre by remember { mutableStateOf<String?>(null) }
+                LaunchedEffect(tournoi.value) {
+                    val t = tournoi.value
+                    if (!modeOnline && t != null) {
+                        codeArbitre = withContext(Dispatchers.IO) {
+                            if (useLocal) DatabaseManager.getCodeArbitre(context, t.first)
+                            else ClientNetworkUtils.getCodeArbitre(t.first)
+                        }
+                    }
+                }
+
                 // ── États affichage donnes/résultats ──────────────────────────────
                 var mainsAAfficher by remember { mutableStateOf<Map<String, List<Carte>>?>(null) }
                 var numDonneSelect by remember { mutableStateOf(0) }
@@ -187,6 +199,9 @@ class ClientActivity : BaseActivity() {
                 var indexDonneRelaisEnCours by remember { mutableStateOf(0) }
                 var nombreDonnesRelaisSaisies by remember { mutableStateOf(0) }
                 var relaisStartPhoto by remember { mutableStateOf(false) }
+
+                // ── État DÉFAILLANCE ────────────────────────────────────────────────
+                var messageDefaillance by remember { mutableStateOf("") }
 
                 // ── Init mode Organisateur ────────────────────────────────────────
                 LaunchedEffect(Unit) {
@@ -628,6 +643,26 @@ class ClientActivity : BaseActivity() {
                     )
                     return@BridgeServeurTheme
 
+                } else if (etape.value == EtapeClient.DIALOG_DEFAILLANCE) {
+                    AppScaffold(
+                        ipAddress = ipServeurExtra,
+                        numeroTournoi = tournoi.value?.first,
+                        equipeChoisie = equipeChoisie.value
+                    ) { }
+                    EcranMessage(
+                        titre = "🚫 Équipe défaillante",
+                        message = messageDefaillance,
+                        onOk = {
+                            changementDeMouvement.value = null
+                            val mvntCourant = mvntTermineNumero.value ?: 0
+                            if (mvntCourant >= TournoiConfig.NBRE_MOUVEMENTS) etape.value =
+                                EtapeClient.ATTENTE_CLASSEMENT
+                            else etape.value = EtapeClient.CHANGEMENT_DE_MOUVEMENT
+                        },
+                        texteBouton = "Continuer"
+                    )
+                    return@BridgeServeurTheme
+
                 } else {
                     val nomEcranDebug = when (etape.value) {
                         EtapeClient.CONNEXION                  -> "Connexion joueur"
@@ -639,6 +674,7 @@ class ClientActivity : BaseActivity() {
                         EtapeClient.AFFICHAGE_MAINS_PHOTO      -> "PhotoSaisie — En cours de tournoi"
                         EtapeClient.DIALOG_RELAIS              -> "Table Relais"
                         EtapeClient.SAISIE_MAINS_RELAIS        -> "Batch — Saisie mains relais"
+                        EtapeClient.DIALOG_DEFAILLANCE         -> "Équipe défaillante"
                         EtapeClient.VERIFIER_TOURNOI           -> "Vérification tournoi"
                         EtapeClient.ENREGISTRE_DONNE           -> "Enregistrement donne..."
                         EtapeClient.ATTENTE_CLASSEMENT         -> "Attente classement"
@@ -728,9 +764,10 @@ class ClientActivity : BaseActivity() {
                                                 mvnt.joueur2EONom
                                             )
                                                 .any { it.trim().lowercase() == "relais" }
+                                            val estDefaillant = mvnt.equipeNSDefaillante || mvnt.equipeEODefaillante
                                             Log.i(
                                                 "RECUPER_MOUVEMENT",
-                                                "🃏 #$num — mvnt=${mvnt.mvntNumero}, table=${mvnt.tableNumero}, relais=$estRelais"
+                                                "🃏 #$num — mvnt=${mvnt.mvntNumero}, table=${mvnt.tableNumero}, relais=$estRelais, defaillant=$estDefaillant"
                                             )
 
                                             if (mvnt.indexDonneAJouer == 0 && mvnt.mvntNumero > 1 && !result.tousTermines) {
@@ -846,6 +883,79 @@ class ClientActivity : BaseActivity() {
                                                     )
                                                     etape.value = EtapeClient.DIALOG_RELAIS
 
+                                                } else if (estDefaillant) {
+                                                    val equipeDefaillanteNumero = if (mvnt.equipeNSDefaillante) mvnt.equipeNS else mvnt.equipeEO
+                                                    val nomDefaillante = if (mvnt.equipeNSDefaillante)
+                                                        "${mvnt.joueur1NSPrenom} ${mvnt.joueur1NSNom} / ${mvnt.joueur2NSPrenom} ${mvnt.joueur2NSNom}"
+                                                    else
+                                                        "${mvnt.joueur1EOPrenom} ${mvnt.joueur1EONom} / ${mvnt.joueur2EOPrenom} ${mvnt.joueur2EONom}"
+
+                                                    mvntTermineNumero.value = mvnt.mvntNumero
+                                                    equipesMvntTermine.value = mvnt.equipeNS to mvnt.equipeEO
+                                                    messageDefaillance = "Équipe $equipeDefaillanteNumero ($nomDefaillante) est déclarée défaillante.\n\nCette donne ne sera pas jouée."
+
+                                                    Log.i(
+                                                        "RECUPER_MOUVEMENT",
+                                                        "🚫 #$num — passerTableDefaillance équipe défaillante=$equipeDefaillanteNumero"
+                                                    )
+                                                    withContext(Dispatchers.IO) {
+                                                        if (useLocal) DatabaseManager.passerTableDefaillance(
+                                                            context, tournoiId, mvnt.mvntNumero, mvnt.equipeNS, mvnt.equipeEO,
+                                                            equipeDefaillanteNumero, mvnt.tableNumero,
+                                                            mvnt.donnes.map { it.numero }, 0
+                                                        )
+                                                        else ClientNetworkUtils.passerTableDefaillance(
+                                                            tournoiId, mvnt.mvntNumero, mvnt.equipeNS, mvnt.equipeEO,
+                                                            equipeDefaillanteNumero, mvnt.tableNumero,
+                                                            mvnt.donnes.map { it.numero }, 0
+                                                        )
+                                                    }
+                                                    val futurResult = withContext(Dispatchers.IO) {
+                                                        if (useLocal) DatabaseManager.getMouvementPourEquipe(
+                                                            context, tournoiId, eq.equipeNumero
+                                                        )
+                                                        else ClientNetworkUtils.recupererMouvement(
+                                                            tournoiId, eq.equipeNumero
+                                                        )
+                                                    }
+                                                    val futurMvntDefaillance =
+                                                        (futurResult as? MouvementResult.Complet)?.mouvement
+                                                    if (futurMvntDefaillance != null) {
+                                                        mouvement.value = futurMvntDefaillance
+                                                        indexDonneAJouer.value = futurMvntDefaillance.indexDonneAJouer
+                                                        contratFinal.value =
+                                                            null; mainsSelectionnees.value =
+                                                            null; aCliqueAfficherMains.value = false
+                                                    }
+                                                    changementDeMouvement.value =
+                                                        futurMvntDefaillance?.let { f ->
+                                                            ChangementDeMouvement(
+                                                                mvntSuivant = f.mvntNumero,
+                                                                entries = listOf(
+                                                                    ChangementDeMouvementEntry(
+                                                                        tableNumero = f.tableNumero,
+                                                                        equipe = Equipe(
+                                                                            f.equipeNS,
+                                                                            Joueur(0, f.joueur1NSNom, f.joueur1NSPrenom),
+                                                                            Joueur(0, f.joueur2NSNom, f.joueur2NSPrenom),
+                                                                            tournoiId
+                                                                        ),
+                                                                        adversaire = Equipe(
+                                                                            f.equipeEO,
+                                                                            Joueur(0, f.joueur1EONom, f.joueur1EOPrenom),
+                                                                            Joueur(0, f.joueur2EONom, f.joueur2EOPrenom),
+                                                                            tournoiId
+                                                                        )
+                                                                    )
+                                                                )
+                                                            )
+                                                        }
+                                                    Log.i(
+                                                        "RECUPER_MOUVEMENT",
+                                                        "✅ #$num → DIALOG_DEFAILLANCE"
+                                                    )
+                                                    etape.value = EtapeClient.DIALOG_DEFAILLANCE
+
                                                 } else {
                                                     mouvement.value = mvnt
                                                     contratFinal.value =
@@ -906,6 +1016,7 @@ class ClientActivity : BaseActivity() {
                                     mouvement = mvnt,
                                     contratFinal = contratFinal.value,
                                     typeTournoi = tournoi.value?.second ?: "",
+                                    codeArbitre = codeArbitre,
                                     onEditEncheres = {
                                         donneur = mouvement.value?.donnes?.getOrNull(
                                             mouvement.value?.indexDonneAJouer ?: 0
@@ -1037,6 +1148,7 @@ class ClientActivity : BaseActivity() {
                             EtapeClient.AFFICHAGE_MAINS_PHOTO -> {}
                             EtapeClient.DIALOG_RELAIS -> {}
                             EtapeClient.SAISIE_MAINS_RELAIS -> {}
+                            EtapeClient.DIALOG_DEFAILLANCE -> {}
                             EtapeClient.AFFICHAGE_DETAILS_RESULTATS -> {}
                             EtapeClient.AFFICHAGE_DONNE -> {}
                             EtapeClient.VERIFICATION_MAINS_AFFICHAGE -> {}
@@ -1047,7 +1159,28 @@ class ClientActivity : BaseActivity() {
                                 LaunchedEffect(donne) {
                                     val gson = Gson()
                                     val retour = withContext(Dispatchers.IO) {
-                                        if (useLocal) DatabaseManager.enregistreDonne(
+                                        if (donne.enErreurArbitre) {
+                                            if (useLocal) DatabaseManager.enregistrerDonneArbitre(
+                                                context,
+                                                idTournoi = tournoi.value!!.first,
+                                                mvntNumero = donne.mvntNumero,
+                                                equipeNS = donne.equipeNS!!,
+                                                equipeEO = donne.equipeEO!!,
+                                                numeroTable = donne.numeroTable!!,
+                                                numeroDonne = donne.numeroDonne,
+                                                indexDonneJouee = donne.indexDonneJouee
+                                            )
+                                            else ClientNetworkUtils.enregistrerDonneArbitre(
+                                                idTournoi = tournoi.value!!.first,
+                                                mvntNumero = donne.mvntNumero,
+                                                equipeNS = donne.equipeNS!!,
+                                                equipeEO = donne.equipeEO!!,
+                                                numeroTable = donne.numeroTable!!,
+                                                numeroDonne = donne.numeroDonne,
+                                                indexDonneJouee = donne.indexDonneJouee
+                                            )
+                                        }
+                                        else if (useLocal) DatabaseManager.enregistreDonne(
                                             context,
                                             idTournoi = tournoi.value!!.first,
                                             mvntNumero = donne.mvntNumero,

@@ -31,6 +31,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import app.resultatsbridge.common.utils.getSecurePrefs
 
 data class TypeTournoiInfo(
     val nomBrut: String,
@@ -73,6 +74,14 @@ class CreationTournoiActivity : BaseActivity() {
 
                 // Nombre de donnes par table saisi par l'organisateur (Mitchell uniquement)
                 var nbreDonnesParTableSaisie by remember { mutableStateOf("4") }
+
+                // Code arbitre (tournois locaux uniquement) : protège le bouton "Arbitre"
+                // côté table. Mémorisé d'un tournoi à l'autre pour ne pas avoir à le
+                // ressaisir à chaque création — laisser vide désactive la fonctionnalité.
+                val securePrefs = remember { getSecurePrefs(this@CreationTournoiActivity) }
+                var codeArbitreSaisi by remember {
+                    mutableStateOf(securePrefs.getString("lastCodeArbitre", "") ?: "")
+                }
 
                 // Gestion du dialog d'avertissement (Howell uniquement)
                 var messageAvertissement by remember { mutableStateOf<String?>(null) }
@@ -307,6 +316,22 @@ class CreationTournoiActivity : BaseActivity() {
                                 }
                             }
 
+                            if (!modeOnline) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                OutlinedTextField(
+                                    value = codeArbitreSaisi,
+                                    onValueChange = {
+                                        codeArbitreSaisi = it
+                                        securePrefs.edit().putString("lastCodeArbitre", it).apply()
+                                    },
+                                    label = { Text("Code arbitre") },
+                                    textStyle = ChampTextStyle,
+                                    colors = champColors(),
+                                    singleLine = true,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+
                             Spacer(modifier = Modifier.height(16.dp))
 
                             OutlinedButton(
@@ -357,12 +382,14 @@ class CreationTournoiActivity : BaseActivity() {
                                                     if (current.nomBrut == "MitchellGueridon") {
                                                         DatabaseManager.creerTournoiMitchellGueridon(
                                                             context = this@CreationTournoiActivity,
-                                                            nbreDonnesParTable = nbreDonnes
+                                                            nbreDonnesParTable = nbreDonnes,
+                                                            codeArbitre = codeArbitreSaisi
                                                         ).toInt()
                                                     } else {
                                                         DatabaseManager.creerTournoiMitchell(
                                                             context = this@CreationTournoiActivity,
-                                                            nbreDonnesParTable = nbreDonnes
+                                                            nbreDonnesParTable = nbreDonnes,
+                                                            codeArbitre = codeArbitreSaisi
                                                         ).toInt()
                                                     }
                                                 CreationTournoiResult(id, null)
@@ -416,7 +443,8 @@ class CreationTournoiActivity : BaseActivity() {
                                                     type = current.nomBrut,
                                                     nbreEquipes = nbEquipes,
                                                     nbreDonnes = current.donnes,
-                                                    nbreEnregistrement = current.tables * current.donnes
+                                                    nbreEnregistrement = current.tables * current.donnes,
+                                                    codeArbitre = codeArbitreSaisi
                                                 ).toInt()
                                                 CreationTournoiResult(id, null)
                                             }

@@ -10,6 +10,7 @@ enum class EtapeClient {
     AFFICHAGE_MAINS_PHOTO,
     DIALOG_RELAIS,                 // Affichage du dialog table relais (stable, pas de re-incrément)
     SAISIE_MAINS_RELAIS,           // Saisie/lecture des mains d'une donne relais
+    DIALOG_DEFAILLANCE,            // Adversaire déclaré défaillant : donne(s) non jouée(s), score 40/60
     VERIFIER_TOURNOI,
     ENREGISTRE_DONNE,
     ATTENTE_CLASSEMENT,

@@ -765,6 +765,77 @@ object ClientNetworkUtils {
         }
     }
 
+    // Appel arbitre depuis la table : donne non jouable, marquée en erreur (moyenne individuelle).
+    fun enregistrerDonneArbitre(
+        idTournoi: Int,
+        mvntNumero: Int,
+        equipeNS: Int,
+        equipeEO: Int,
+        numeroTable: Int,
+        numeroDonne: Int,
+        indexDonneJouee: Int
+    ): Int {
+        val bodyJson = Gson().toJson(mapOf(
+            "idTournoi"       to idTournoi,
+            "mvntNumero"      to mvntNumero,
+            "equipeNS"        to equipeNS,
+            "equipeEO"        to equipeEO,
+            "numeroTable"     to numeroTable,
+            "numeroDonne"     to numeroDonne,
+            "indexDonneJouee" to indexDonneJouee
+        ))
+        val urlStr = urlAvecPort("enregistrerDonneArbitre")
+        Log.i("ClientNetworkUtils", "🧑‍⚖️ enregistrerDonneArbitre POST → $urlStr")
+        return try {
+            val response = postUrl(urlStr, bodyJson)
+            JSONObject(response).getInt("indexDonneAJouer")
+        } catch (e: Exception) {
+            Log.e("ClientNetworkUtils", "❌ Erreur enregistrerDonneArbitre : ${e.message}")
+            -1
+        }
+    }
+
+    // Appelée par une table qui détecte que son adversaire est une équipe défaillante
+    // (equipes.defaillante). Enregistre les donnes de la ronde en 40/60 et fait
+    // avancer la progression des deux équipes — mirroring enregistrerDonneArbitre.
+    fun passerTableDefaillance(
+        idTournoi: Int, mvntNumero: Int, equipeNS: Int, equipeEO: Int,
+        equipeDefaillante: Int, numeroTable: Int, numerosDonnes: List<Int>, indexDonneJouee: Int
+    ): Boolean {
+        val bodyJson = Gson().toJson(mapOf(
+            "idTournoi"         to idTournoi,
+            "mvntNumero"        to mvntNumero,
+            "equipeNS"          to equipeNS,
+            "equipeEO"          to equipeEO,
+            "equipeDefaillante" to equipeDefaillante,
+            "numeroTable"       to numeroTable,
+            "numerosDonnes"     to numerosDonnes,
+            "indexDonneJouee"   to indexDonneJouee
+        ))
+        val urlStr = urlAvecPort("passerTableDefaillance")
+        Log.i("ClientNetworkUtils", "🚫 passerTableDefaillance POST → $urlStr")
+        return try {
+            val response = postUrl(urlStr, bodyJson)
+            JSONObject(response).optBoolean("ok", false)
+        } catch (e: Exception) {
+            Log.e("ClientNetworkUtils", "❌ Erreur passerTableDefaillance : ${e.message}")
+            false
+        }
+    }
+
+    // Code arbitre du tournoi (défini par l'organisateur à la création), ou null si non défini.
+    suspend fun getCodeArbitre(idTournoi: Int): String? {
+        return try {
+            val urlStr = urlAvecPort("getCodeArbitre?idTournoi=$idTournoi")
+            val reponse = withContext(Dispatchers.IO) { readUrl(urlStr) }
+            val code = JSONObject(reponse).optString("codeArbitre", "")
+            code.ifEmpty { null }
+        } catch (e: Exception) {
+            Log.e("ClientNetworkUtils", "❌ Erreur getCodeArbitre : ${e.message}")
+            null
+        }
+    }
+
     suspend fun getFuturMouvement(
         idTournoi: Int,
         mvntActuel: Int,
@@ -1254,6 +1325,64 @@ object ClientNetworkUtils {
             JSONObject(response).optString("etat") == "OK"
         } catch (e: Exception) {
             Log.e("ClientNetworkUtils", "❌ supprimerMainsAvantTournoi : ${e.message}", e)
+            false
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Donnes cibles (préparation d'un tournoi préétabli, id_tournoi=-1)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    suspend fun getDonnesCibles(): List<DonneAvantTournoi> {
+        return try {
+            val urlStr = urlAvecPort("getDonnesCibles")
+            Log.i("ClientNetworkUtils", "🌍 getDonnesCibles : $urlStr")
+            val response = withContext(Dispatchers.IO) { readUrl(urlStr) }
+            val json = JSONObject(response)
+            if (json.optString("etat") != "OK") return emptyList()
+            val arr = json.getJSONArray("donnes")
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                val mainsArr = o.getJSONArray("mains")
+                val mains = (0 until mainsArr.length()).map { j ->
+                    val m = mainsArr.getJSONArray(j)
+                    (0 until m.length()).map { k -> m.getString(k) }
+                }
+                DonneAvantTournoi(
+                    numeroDonne = o.getInt("numero_donne"),
+                    donneur     = o.optString("donneur", "N"),
+                    vulnerable  = o.optString("vulnerable", "P"),
+                    mains       = mains
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("ClientNetworkUtils", "❌ getDonnesCibles : ${e.message}", e)
+            emptyList()
+        }
+    }
+
+    suspend fun sauvegarderDonneCible(numeroDonne: Int, mains: List<List<String>>): Boolean {
+        return try {
+            val bodyJson = Gson().toJson(mapOf("numeroDonne" to numeroDonne, "mains" to mains))
+            val urlStr = urlAvecPort("sauvegarderDonneCible")
+            Log.i("ClientNetworkUtils", "➡️ sauvegarderDonneCible POST donne=$numeroDonne")
+            val response = withContext(Dispatchers.IO) { postUrl(urlStr, bodyJson) }
+            JSONObject(response).optString("etat") == "OK"
+        } catch (e: Exception) {
+            Log.e("ClientNetworkUtils", "❌ sauvegarderDonneCible : ${e.message}", e)
+            false
+        }
+    }
+
+    suspend fun supprimerDonneCible(numeroDonne: Int): Boolean {
+        return try {
+            val bodyJson = Gson().toJson(mapOf("numeroDonne" to numeroDonne))
+            val urlStr = urlAvecPort("supprimerDonneCible")
+            Log.i("ClientNetworkUtils", "➡️ supprimerDonneCible POST donne=$numeroDonne")
+            val response = withContext(Dispatchers.IO) { postUrl(urlStr, bodyJson) }
+            JSONObject(response).optString("etat") == "OK"
+        } catch (e: Exception) {
+            Log.e("ClientNetworkUtils", "❌ supprimerDonneCible : ${e.message}", e)
             false
         }
     }

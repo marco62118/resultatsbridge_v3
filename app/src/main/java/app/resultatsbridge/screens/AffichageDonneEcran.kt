@@ -268,19 +268,43 @@ private fun Modifier.rotateWithLayout(degrees: Float): Modifier =
         }
         .rotate(degrees)
 
-// Convertit un code contrat "3K" → "3♦", "4P" → "4♠", "2S"/"2SA" → "2SA", etc.
+// Convertit un code contrat "3K" → "3♦", "4P" → "4♠", "2S"/"2SA" → "2SA",
+// "1CX" → "1♥X", "3TXX" → "3♣XX", etc.
 fun formatContrat(contrat: String): String {
     if (contrat.isBlank()) return contrat
     val first = contrat.first()
     if (!first.isDigit()) return contrat
-    return first + when (contrat.drop(1).uppercase()) {
+    var reste = contrat.drop(1).uppercase()
+    val insulte = when {
+        reste.endsWith("XX") -> { reste = reste.dropLast(2); "XX" }
+        reste.endsWith("X")  -> { reste = reste.dropLast(1); "X" }
+        else -> ""
+    }
+    val symbole = when (reste) {
         "P"       -> "♠"
         "C"       -> "♥"
         "K"       -> "♦"
         "T"       -> "♣"
         "S", "SA" -> "SA"
-        else      -> contrat.drop(1)
+        else      -> reste
     }
+    return "$first$symbole$insulte"
+}
+
+// Convertit un code entame "AsK" → "As♦", "10P" → "10♠", etc.
+// (dernier caractère = code couleur P/C/K/T, le reste = la carte)
+fun formatEntame(entame: String): String {
+    if (entame.isBlank()) return entame
+    val couleurCode = entame.last().toString()
+    val carte = entame.dropLast(1)
+    val symbole = when (couleurCode) {
+        "P" -> "♠"
+        "C" -> "♥"
+        "K" -> "♦"
+        "T" -> "♣"
+        else -> couleurCode
+    }
+    return "$carte$symbole"
 }
 
 private val ORDRE_COULEUR = mapOf("P" to 0, "C" to 1, "T" to 2, "K" to 3)

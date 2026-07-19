@@ -31,30 +31,45 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.resultatsbridge.main.BaseActivity
 import app.resultatsbridge.common.AppScaffold
+import app.resultatsbridge.common.EcranPleinScaffold
 import app.resultatsbridge.common.model.Carte
 import app.resultatsbridge.common.model.DonneAvantTournoi
 import app.resultatsbridge.common.theme.BridgeServeurTheme
 import app.resultatsbridge.common.ui.components.SuiteStyle
 import app.resultatsbridge.common.ui.components.SuiteSymbol
 import app.resultatsbridge.common.utils.RepartitionCartes
+import app.resultatsbridge.client.ClientNetworkUtils
 import app.resultatsbridge.organisateur.data.DatabaseManager
 import app.resultatsbridge.screens.AffichageMainsBatchScreen
 import app.resultatsbridge.screens.CardSlotPhoto
 import kotlinx.coroutines.launch
 
-private enum class PhaseTri { CHOIX_DONNE, CAPTURE_INITIALE, LOT_RESULTAT, VERIF_CHOIX, CAPTURE_VERIF, VERIF_RESULTAT }
+private enum class PhaseTri { CHOIX_MODE, CHOIX_DONNE, CAPTURE_INITIALE, LOT_RESULTAT, VERIF_CHOIX, CAPTURE_VERIF, VERIF_RESULTAT }
+
+// Ordre "trié par couleur de A à 2" (cartes déjà pré-triées par le manipulateur, pas besoin
+// de photo/reconnaissance) — un lot par couleur au lieu d'un lot par tas photographié.
+private val ordreRangsTries = listOf("A", "R", "D", "V", "10", "9", "8", "7", "6", "5", "4", "3", "2")
+private val ordreCouleursLots = listOf("P", "C", "K", "T")
+
+private fun lotsPreTries(): List<List<Carte>> =
+    ordreCouleursLots.map { couleur -> ordreRangsTries.map { rang -> Carte(rang, couleur) } }
 
 class TriDuplicationActivity : BaseActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        val ipReseau = intent.getStringExtra("ip_serveur_preparation")
+        if (ipReseau != null) ClientNetworkUtils.initialiserServeur(ipReseau)
+
         setContent {
             BridgeServeurTheme {
                 val scope = rememberCoroutineScope()
                 var donneCibles by remember { mutableStateOf<List<DonneAvantTournoi>>(emptyList()) }
+                var numerosPrepares by remember { mutableStateOf<Set<Int>>(emptySet()) }
                 var isLoading by remember { mutableStateOf(true) }
-                var phase by remember { mutableStateOf(PhaseTri.CHOIX_DONNE) }
+                var phase by remember { mutableStateOf(PhaseTri.CHOIX_MODE) }
+                var modeVrac by remember { mutableStateOf(true) }
                 var donneChoisie by remember { mutableStateOf<DonneAvantTournoi?>(null) }
                 // Mains validées par la capture (4x13), gardées en mémoire, pas encore enregistrées en base.
                 var mainsValidees by remember { mutableStateOf<List<List<Carte>>?>(null) }
@@ -65,7 +80,11 @@ class TriDuplicationActivity : BaseActivity() {
                 LaunchedEffect(Unit) {
                     scope.launch {
                         isLoading = true
-                        donneCibles = DatabaseManager.getDonnesCibles(this@TriDuplicationActivity)
+                        donneCibles = if (ipReseau != null) ClientNetworkUtils.getDonnesCibles()
+                                      else DatabaseManager.getDonnesCibles(this@TriDuplicationActivity)
+                        numerosPrepares = (if (ipReseau != null) ClientNetworkUtils.getMainsAvantTournoi()
+                                           else DatabaseManager.getMainsAvantTournoi(this@TriDuplicationActivity))
+                            .map { it.numeroDonne }.toSet()
                         isLoading = false
                     }
                 }
@@ -74,17 +93,40 @@ class TriDuplicationActivity : BaseActivity() {
                     val numDonne = donneChoisie?.numeroDonne ?: return
                     scope.launch {
                         val mainsCodes = mains.map { main -> main.map { it.code } }
-                        val ok = DatabaseManager.sauvegarderMainsAvantTournoi(
-                            this@TriDuplicationActivity, numDonne, mainsCodes
-                        )
-                        if (ok) { finish() } else { messageFinal = "❌ Erreur lors de l'enregistrement" }
+                        val ok = if (ipReseau != null) {
+                            ClientNetworkUtils.sauvegarderMainsAvantTournoi(numDonne, mainsCodes)
+                        } else {
+                            DatabaseManager.sauvegarderMainsAvantTournoi(
+                                this@TriDuplicationActivity, numDonne, mainsCodes
+                            )
+                        }
+                        if (!ok) { messageFinal = "❌ Erreur lors de l'enregistrement"; return@launch }
+
+                        // Rafraîchir la liste et enchaîner directement sur la donne suivante s'il
+                        // en reste à préparer — pas besoin de repasser par le choix vrac/trié.
+                        val nouveauxPrepares = (if (ipReseau != null) ClientNetworkUtils.getMainsAvantTournoi()
+                                                else DatabaseManager.getMainsAvantTournoi(this@TriDuplicationActivity))
+                            .map { it.numeroDonne }.toSet()
+                        numerosPrepares = nouveauxPrepares
+
+                        if (donneCibles.any { it.numeroDonne !in nouveauxPrepares }) {
+                            donneChoisie = null
+                            mainsValidees = null
+                            mainsVerif = null
+                            lotIndex = 0
+                            messageFinal = ""
+                            phase = PhaseTri.CHOIX_DONNE
+                        } else {
+                            finish()
+                        }
                     }
                 }
 
                 // Retour "un pas en arrière" — utilisé à la fois par le bouton rouge à l'écran
                 // et par la touche/geste retour du système (neutralisé sinon il quitterait l'écran
                 // en cours et ferait perdre le tri déjà fait).
-                fun retourDepuisChoixDonne() { finish() }
+                fun retourDepuisChoixMode() { finish() }
+                fun retourDepuisChoixDonne() { phase = PhaseTri.CHOIX_MODE; donneChoisie = null }
                 fun retourDepuisCaptureInitiale() { phase = PhaseTri.CHOIX_DONNE; donneChoisie = null }
                 fun retourDepuisLot() {
                     if (lotIndex > 0) lotIndex-- else { phase = PhaseTri.CHOIX_DONNE; donneChoisie = null }
@@ -94,12 +136,32 @@ class TriDuplicationActivity : BaseActivity() {
                 fun retourDepuisVerifResultat() { phase = PhaseTri.VERIF_CHOIX }
 
                 when (phase) {
+                    PhaseTri.CHOIX_MODE -> {
+                        BackHandler(onBack = ::retourDepuisChoixMode)
+                        EcranChoixMode(
+                            onChoisir = { vrac -> modeVrac = vrac; phase = PhaseTri.CHOIX_DONNE },
+                            onRetour = ::retourDepuisChoixMode
+                        )
+                    }
+
                     PhaseTri.CHOIX_DONNE -> {
                         BackHandler(onBack = ::retourDepuisChoixDonne)
                         EcranChoixDonne(
                             donneCibles = donneCibles,
+                            numerosPrepares = numerosPrepares,
                             isLoading = isLoading,
-                            onChoisir = { donne -> donneChoisie = donne; phase = PhaseTri.CAPTURE_INITIALE },
+                            onChoisir = { donne ->
+                                donneChoisie = donne
+                                if (modeVrac) {
+                                    phase = PhaseTri.CAPTURE_INITIALE
+                                } else {
+                                    // Cartes déjà triées par couleur : pas de photo, le contenu
+                                    // de chaque lot (une couleur, A à 2) est connu d'avance.
+                                    mainsValidees = lotsPreTries()
+                                    lotIndex = 0
+                                    phase = PhaseTri.LOT_RESULTAT
+                                }
+                            },
                             onRetour = ::retourDepuisChoixDonne
                         )
                     }
@@ -120,8 +182,11 @@ class TriDuplicationActivity : BaseActivity() {
                         val mains = mainsValidees!!
                         val resultatLot = RepartitionCartes.calculer(donneChoisie!!, mains[lotIndex].map { it.code })
                         val dernierLot = lotIndex == mains.size - 1
+                        val couleurTitre = if (modeVrac) null else ordreCouleursLots[lotIndex]
+                        val texteTitre = if (modeVrac) "Lot ${lotIndex + 1}/${mains.size}" else "(A → 2)"
                         EcranRepartitionLot(
-                            titre = "Lot ${lotIndex + 1}/${mains.size}",
+                            couleurTitre = couleurTitre,
+                            texteTitre = texteTitre,
                             lot = mains[lotIndex],
                             resultat = resultatLot,
                             texteBouton = if (dernierLot) "✅ Validé — passer à la vérification" else "✅ Validé — lot suivant",
@@ -169,8 +234,63 @@ class TriDuplicationActivity : BaseActivity() {
 }
 
 @Composable
+private fun EcranChoixMode(
+    onChoisir: (vrac: Boolean) -> Unit,
+    onRetour: () -> Unit
+) {
+    AppScaffold(ipAddress = "", numeroTournoi = null, equipeChoisie = null, nomEcran = "Trier un lot de cartes") {
+        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text("Comment sont les cartes ?", style = MaterialTheme.typography.headlineSmall)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "Cela détermine s'il faut photographier les cartes ou pas.",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.Black
+            )
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Card(
+                onClick = { onChoisir(true) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("🃏 En vrac", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Le jeu mélangé est étalé en 4 lots de 13 cartes. On photographie chaque lot pour l'identifier.",
+                        fontSize = 13.sp, color = Color.Black
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(
+                onClick = { onChoisir(false) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("🔤 Déjà triées par couleur", fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "Les 4 couleurs sont déjà triées de As à 2 (ex. tous les piques). Pas de photo, on passe directement au dispatchage.",
+                        fontSize = 13.sp, color = Color.Black
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.weight(1f))
+            BoutonRetourRouge(onRetour)
+            Spacer(modifier = Modifier.height(4.dp))
+        }
+    }
+}
+
+@Composable
 private fun EcranChoixDonne(
     donneCibles: List<DonneAvantTournoi>,
+    numerosPrepares: Set<Int>,
     isLoading: Boolean,
     onChoisir: (DonneAvantTournoi) -> Unit,
     onRetour: () -> Unit
@@ -206,7 +326,15 @@ private fun EcranChoixDonne(
                                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Donne ${donne.numeroDonne}", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Donne ${donne.numeroDonne}", fontWeight = FontWeight.Bold)
+                                        Text(
+                                            if (donne.numeroDonne in numerosPrepares) "✅ Préparée" else "⏳ À préparer",
+                                            fontSize = 12.sp,
+                                            color = if (donne.numeroDonne in numerosPrepares) Color(0xFF2E7D32) else Color(0xFFE65100),
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
                                     Text(
                                         "Donneur: ${donne.donneur}  Vulnérable: ${donne.vulnerable}",
                                         fontSize = 12.sp, color = Color.Black
@@ -227,54 +355,71 @@ private fun EcranChoixDonne(
 
 @Composable
 private fun EcranRepartitionLot(
-    titre: String,
+    couleurTitre: String?, // code couleur (P/C/K/T) si mode trié : icône personnalisée devant le texte
+    texteTitre: String,
     lot: List<Carte>,
     resultat: RepartitionCartes.Resultat,
     texteBouton: String,
     onValide: () -> Unit,
     onRetour: () -> Unit
 ) {
-    AppScaffold(ipAddress = "", numeroTournoi = null, equipeChoisie = null, nomEcran = titre) {
-        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-            Spacer(modifier = Modifier.height(6.dp))
+    // Pas de bandeau d'entête ici (EcranPleinScaffold) : sur petit écran, priorité à faire
+    // tenir les 4 mains + le bandeau des cartes sans avoir besoin de scroller.
+    EcranPleinScaffold {
+        Column(modifier = Modifier.fillMaxSize().background(Color(0xFF2E7D32)).padding(horizontal = 10.dp, vertical = 4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (couleurTitre != null) {
+                    // Couleurs standard des cartes conservées (noir pique/trèfle, rouge
+                    // cœur/carreau) — petit fond blanc derrière l'icône pour qu'elle reste
+                    // visible sur le vert foncé du bandeau, sans changer sa couleur.
+                    Box(
+                        modifier = Modifier.background(Color.White, RoundedCornerShape(3.dp)).padding(2.dp)
+                    ) {
+                        SuiteSymbol(couleur = couleurTitre, color = SuiteStyle.couleurCode(couleurTitre), sizeDp = 17f)
+                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+                Text(texteTitre, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            }
+            Spacer(modifier = Modifier.height(4.dp))
 
             Column(
                 modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 CarteJoueur("N", resultat, modifier = Modifier.fillMaxWidth(0.72f))
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     CarteJoueur("O", resultat, modifier = Modifier.weight(1f))
                     CarteJoueur("E", resultat, modifier = Modifier.weight(1f))
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 CarteJoueur("S", resultat, modifier = Modifier.fillMaxWidth(0.72f))
 
                 if (resultat.nonReconnues.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE))
                     ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("⚠️ Non reconnues (${resultat.nonReconnues.size})", fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(4.dp))
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            Text("⚠️ Non reconnues (${resultat.nonReconnues.size})", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 "Absentes de la donne cible — erreur de photo probable : " +
                                     resultat.nonReconnues.joinToString("   ") { Carte.fromCode(it).affichage },
-                                fontSize = 14.sp,
+                                fontSize = 12.sp,
                                 color = Color.Black
                             )
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 LotAvecDestinations(lot, resultat)
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 BoutonRetourRouge(onRetour)
                 Button(onClick = onValide, modifier = Modifier.weight(1f)) { Text(texteBouton) }
@@ -292,46 +437,39 @@ private fun EcranVerifChoix(
     message: String,
     onRetour: () -> Unit
 ) {
-    AppScaffold(ipAddress = "", numeroTournoi = null, equipeChoisie = null, nomEcran = "Vérification finale") {
-        Column(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("Les 4 lots ont été triés", style = MaterialTheme.typography.headlineSmall)
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                "Cible reconstituée dans l'ordre où les cartes ont été posées — comparez à vos 4 tas.",
-                style = MaterialTheme.typography.bodySmall,
-                color = Color.Black
-            )
+    EcranPleinScaffold {
+        Column(modifier = Modifier.fillMaxSize().background(Color(0xFF2E7D32)).padding(horizontal = 10.dp, vertical = 6.dp)) {
             if (message.isNotEmpty()) {
+                Text(message, color = Color(0xFFFFCDD2), fontWeight = FontWeight.Medium)
                 Spacer(modifier = Modifier.height(6.dp))
-                Text(message, color = Color(0xFFC62828), fontWeight = FontWeight.Medium)
             }
-            Spacer(modifier = Modifier.height(8.dp))
 
             Column(modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                 RepartitionCartes.positions.forEach { position ->
-                    Text(
-                        nomPosition(position),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = couleurPosition(position)
-                    )
+                    Box(
+                        modifier = Modifier.background(fondPosition(position), RoundedCornerShape(3.dp)).padding(horizontal = 6.dp, vertical = 1.dp)
+                    ) {
+                        Text(nomPosition(position), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                    }
                     LigneMain(codes = ordreDePose[position].orEmpty())
                     Spacer(modifier = Modifier.height(6.dp))
                 }
             }
 
-            Button(
-                onClick = onVerifieVisuellement,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("👁️ Vérifié visuellement — enregistrer") }
-            Spacer(modifier = Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = onRepasserPhoto,
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("📷 Repasser une photo de vérification") }
-            Spacer(modifier = Modifier.height(8.dp))
-            BoutonRetourRouge(onRetour)
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                BoutonRetourRouge(onRetour)
+                Button(
+                    onClick = onVerifieVisuellement,
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+                    modifier = Modifier.weight(1f)
+                ) { Text("👁️ Vérifié", fontSize = 12.sp) }
+                OutlinedButton(
+                    onClick = onRepasserPhoto,
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+                    modifier = Modifier.weight(1f)
+                ) { Text("📷 Repasser photo", fontSize = 12.sp) }
+            }
             Spacer(modifier = Modifier.height(4.dp))
         }
     }
@@ -433,33 +571,56 @@ private fun ordreDePoseParPosition(mainsValidees: List<List<Carte>>, donneCible:
 // AffichageMainsScreen.kt) : bouton retour explicite, distinct du retour système.
 @Composable
 private fun BoutonRetourRouge(onRetour: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.clickable { onRetour() }.padding(4.dp)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.clickable { onRetour() }.padding(2.dp)
     ) {
-        Box(Modifier.size(48.dp).background(Color.Red, CircleShape), contentAlignment = Alignment.Center) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour", tint = Color.White, modifier = Modifier.size(26.dp))
+        Box(Modifier.size(32.dp).background(Color.Red, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Retour", tint = Color.White, modifier = Modifier.size(18.dp))
         }
-        Text("Retour", color = Color.Red, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
+
+// Hauteur commune au bandeau du label et à chaque ligne de couleur — même gabarit pour les
+// 5 lignes (~1.2x la hauteur naturelle d'un texte 15sp, pour un peu d'air).
+private val hauteurLigneJoueur = 24.dp
 
 @Composable
 private fun CarteJoueur(position: String, resultat: RepartitionCartes.Resultat, modifier: Modifier = Modifier) {
     val cartes = resultat.parJoueur[position].orEmpty()
     Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD))) {
-        Column(modifier = Modifier.padding(10.dp)) {
-            Text(nomPosition(position), fontWeight = FontWeight.Bold, fontSize = 18.sp, color = couleurPosition(position))
-            Spacer(modifier = Modifier.height(4.dp))
+        Column(modifier = Modifier.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            // Bandeau sur toute la largeur du pavé (pas juste une pastille autour du texte).
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(hauteurLigneJoueur)
+                    .background(fondPosition(position), RoundedCornerShape(3.dp)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(nomPosition(position), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.White)
+            }
+            Spacer(modifier = Modifier.height(2.dp))
             ordreCouleurs.forEach { couleur ->
                 // Ordre inverse d'apparition sur la photo (dernière carte du tas d'abord)
                 val valeurs = cartes.filter { it.endsWith(couleur) }.map { it.dropLast(1) }.reversed()
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    SuiteSymbol(couleur = couleur, color = SuiteStyle.couleurCode(couleur), sizeDp = 18f)
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(valeurs.joinToString("  "), fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.Black)
+                // heightIn (pas height) : une couleur complète (13 cartes) chez Est/Ouest, plus
+                // étroits que Nord/Sud, doit pouvoir passer sur 2 lignes sans être coupée.
+                Row(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = hauteurLigneJoueur),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    SuiteSymbol(couleur = couleur, color = SuiteStyle.couleurCode(couleur), sizeDp = 20f)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        valeurs.joinToString(" "),
+                        fontSize = 20.sp,
+                        lineHeight = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
-                Spacer(modifier = Modifier.height(2.dp))
             }
         }
     }
@@ -469,47 +630,44 @@ private fun CarteJoueur(position: String, resultat: RepartitionCartes.Resultat, 
 private val ordreCouleurs = listOf("P", "C", "K", "T")
 
 // Le lot tel que photographié (ordre d'origine), avec la destination (N/E/S/O) au-dessus
-// de chaque carte — variante d'affichage à comparer en rapidité avec les 4 cartes ci-dessus.
+// de chaque carte — la partie la plus importante de l'écran, à ne jamais sacrifier pour
+// la place (voir CarteJoueur au-dessus, volontairement tassé).
 @Composable
 private fun LotAvecDestinations(lot: List<Carte>, resultat: RepartitionCartes.Resultat) {
     val proprietaire = remember(resultat) {
         resultat.parJoueur.entries.flatMap { (position, cartes) -> cartes.map { it to position } }.toMap()
     }
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Text("Lot photographié — destination de chaque carte", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-        Spacer(modifier = Modifier.height(4.dp))
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val spacing = 2.dp
-            val largeurCase = (maxWidth - spacing * 12) / 13
-            val hauteurCase = largeurCase * 2.2f
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                for (i in 0 until 13) {
-                    val carte = lot.getOrNull(i)
-                    val destination = carte?.let { proprietaire[it.code] } ?: "?"
-                    Column(modifier = Modifier.width(largeurCase), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .background(Color(0xFFE3F2FD), RoundedCornerShape(4.dp))
-                                .padding(vertical = 2.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                destination,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = (largeurCase.value * 0.75f).coerceIn(16f, 26f).sp,
-                                color = if (carte != null) couleurPosition(destination) else Color.Black
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(2.dp))
-                        CardSlotPhoto(
-                            code = carte?.code,
-                            isSelected = false,
-                            onClick = {},
-                            widthDp = largeurCase.value,
-                            heightDp = hauteurCase.value
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val spacing = 2.dp
+        val largeurCase = (maxWidth - spacing * 12) / 13
+        val hauteurCase = largeurCase * 2.2f
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
+            for (i in 0 until 13) {
+                val carte = lot.getOrNull(i)
+                val destination = carte?.let { proprietaire[it.code] } ?: "?"
+                Column(modifier = Modifier.width(largeurCase), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(if (carte != null) fondPosition(destination) else Color(0xFFBDBDBD), RoundedCornerShape(4.dp))
+                            .padding(vertical = 2.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            destination,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = (largeurCase.value * 0.75f).coerceIn(16f, 26f).sp,
+                            color = Color.White
                         )
                     }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    CardSlotPhoto(
+                        code = carte?.code,
+                        isSelected = false,
+                        onClick = {},
+                        widthDp = largeurCase.value,
+                        heightDp = hauteurCase.value
+                    )
                 }
             }
         }
@@ -520,12 +678,13 @@ private fun nomPosition(position: String): String = when (position) {
     "N" -> "Nord"; "E" -> "Est"; "S" -> "Sud"; "O" -> "Ouest"; else -> position
 }
 
-// Une couleur par position, pour relier d'un coup d'œil la lettre au-dessus d'une carte
-// et le pavé du joueur correspondant.
-private fun couleurPosition(position: String): Color = when (position) {
-    "N" -> Color.Black
-    "E" -> Color(0xFF2E7D32) // vert
-    "S" -> Color(0xFF1565C0) // bleu
-    "O" -> Color(0xFFC62828) // rouge
-    else -> Color.Black
+// Un fond par position (texte blanc dessus) plutôt qu'un texte coloré sur fond clair —
+// 4 teintes foncées bien distinctes entre elles (l'ancien vert/bleu texte manquait de
+// contraste), pour repérer la destination d'un coup d'œil en dispatchant les cartes.
+private fun fondPosition(position: String): Color = when (position) {
+    "N" -> Color(0xFF212121) // gris très foncé
+    "E" -> Color(0xFF1B5E20) // vert foncé
+    "S" -> Color(0xFF0D47A1) // bleu foncé
+    "O" -> Color(0xFFB71C1C) // rouge foncé
+    else -> Color(0xFF616161)
 }

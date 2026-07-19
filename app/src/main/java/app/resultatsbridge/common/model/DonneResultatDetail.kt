@@ -13,5 +13,6 @@ data class DonneResultatDetail(
     val pointsEO: Int,
     val ptsNS: Double,
     val ptsEO: Double,
-    val vulnerable: String  // ✅ AJOUTER
+    val vulnerable: String,  // ✅ AJOUTER
+    val typeCorrection: String? = null // null = normal, "ERREUR_MOYENNE_IND" = flaggée en erreur
 )

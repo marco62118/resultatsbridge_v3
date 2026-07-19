@@ -121,7 +121,8 @@ object DatabaseManager {
         type: String,
         nbreEquipes: Int,
         nbreDonnes: Int,
-        nbreEnregistrement: Int
+        nbreEnregistrement: Int,
+        codeArbitre: String = ""
     ): Long {
         val nbreMouvements     = nbreEquipes - 1
         val nbreDonnesParTable = if (nbreMouvements > 0) nbreDonnes / nbreMouvements else 0
@@ -143,6 +144,7 @@ object DatabaseManager {
                 put("nbre_mouvements",       nbreMouvements)
                 put("nbre_donnes_par_table", nbreDonnesParTable)
                 put("nbre_tables",           0)
+                put("code_arbitre",         codeArbitre)
             }
             val id = db.insert("tournois", null, values)
             Log.i("DatabaseManager", "✅ Tournoi créé avec ID : $id")
@@ -163,7 +165,8 @@ object DatabaseManager {
     // ─────────────────────────────────────────────────────────────────────
     fun creerTournoiMitchell(
         context: Context,
-        nbreDonnesParTable: Int
+        nbreDonnesParTable: Int,
+        codeArbitre: String = ""
     ): Long {
         // TournoiConfig sera mis à jour dans miseAJourTournoiMitchell()
         TournoiConfig.NBRE_MOUVEMENTS       = 0
@@ -183,6 +186,7 @@ object DatabaseManager {
                 put("nbre_donnes_par_table", nbreDonnesParTable)
                 put("nbre_mouvements", 0)
                 put("nbre_tables", 0)
+                put("code_arbitre", codeArbitre)
             }
             val id = db.insert("tournois", null, values)
             Log.i("DatabaseManager", "✅ Tournoi Mitchell créé (provisoire) ID=$id | donnes/table=$nbreDonnesParTable")
@@ -240,7 +244,7 @@ object DatabaseManager {
     // MITCHELL GUÉRIDON : création du tournoi avec valeurs provisoires.
     // Même principe que Mitchell : nbreEquipes inconnu à ce stade.
     // ─────────────────────────────────────────────────────────────────────
-    fun creerTournoiMitchellGueridon(context: Context, nbreDonnesParTable: Int): Long {
+    fun creerTournoiMitchellGueridon(context: Context, nbreDonnesParTable: Int, codeArbitre: String = ""): Long {
         TournoiConfig.NBRE_MOUVEMENTS       = 0
         TournoiConfig.NBRE_DONNES_PAR_TABLE = nbreDonnesParTable
         val db = DatabaseHelper.getDatabase(context)
@@ -257,6 +261,7 @@ object DatabaseManager {
                 put("nbre_donnes_par_table", nbreDonnesParTable)
                 put("nbre_mouvements", 0)
                 put("nbre_tables", 0)
+                put("code_arbitre", codeArbitre)
             }
             val id = db.insert("tournois", null, values)
             Log.i("DatabaseManager", "✅ Tournoi MitchellGuéridon créé (provisoire) ID=$id | donnes/table=$nbreDonnesParTable")
@@ -362,11 +367,11 @@ object DatabaseManager {
         val derniereDonne = setDonnes * nbreDonnesParTable
         Log.i("DatabaseManager", "   → offset=$offset setDonnes=$setDonnes | donnes=$premiereDonne..$derniereDonne")
 
-        data class InfosJoueurs(val j1Nom: String, val j1Prenom: String, val j2Nom: String, val j2Prenom: String)
+        data class InfosJoueurs(val j1Nom: String, val j1Prenom: String, val j2Nom: String, val j2Prenom: String, val defaillante: Boolean)
         fun getInfosJoueurs(numEquipe: Int): InfosJoueurs {
-            var j1Nom = ""; var j1Prenom = ""; var j2Nom = ""; var j2Prenom = ""
+            var j1Nom = ""; var j1Prenom = ""; var j2Nom = ""; var j2Prenom = ""; var defaillante = false
             db.rawQuery(
-                """SELECT j1.nom, j1.prenom, j2.nom, j2.prenom
+                """SELECT j1.nom, j1.prenom, j2.nom, j2.prenom, e.defaillante
                    FROM equipes e
                    JOIN joueurs j1 ON j1.ID = e.id_joueur1
                    JOIN joueurs j2 ON j2.ID = e.id_joueur2
@@ -376,9 +381,10 @@ object DatabaseManager {
                 if (c.moveToFirst()) {
                     j1Nom = c.getString(0); j1Prenom = c.getString(1)
                     j2Nom = c.getString(2); j2Prenom = c.getString(3)
+                    defaillante = c.getInt(4) != 0
                 }
             }
-            return InfosJoueurs(j1Nom, j1Prenom, j2Nom, j2Prenom)
+            return InfosJoueurs(j1Nom, j1Prenom, j2Nom, j2Prenom, defaillante)
         }
         val joueursNS = getInfosJoueurs(equipeNS)
         val joueursEO = getInfosJoueurs(equipeEO)
@@ -434,7 +440,9 @@ object DatabaseManager {
             joueur2EONom = joueursEO.j2Nom,
             joueur2EOPrenom = joueursEO.j2Prenom,
             donnes = listeDonnes,
-            indexDonneAJouer = indexDonneAJouer
+            indexDonneAJouer = indexDonneAJouer,
+            equipeNSDefaillante = joueursNS.defaillante,
+            equipeEODefaillante = joueursEO.defaillante
         )
         if (estRelais) Log.i("DatabaseManager", "🏖️ MitchellGuéridon table relais → aucune donne")
         else Log.i("DatabaseManager", "✅ MitchellGuéridon → mvnt=$mvntNumero table=$tableNumero NS=$equipeNS EO=$equipeEO set=$setDonnes donnes=$premiereDonne..$derniereDonne")
@@ -510,11 +518,11 @@ object DatabaseManager {
         Log.i("DatabaseManager", "   → setDonnes=$setDonnes | donnes=$premiereDonne..$derniereDonne")
 
         // 7️⃣ Récupérer les infos joueurs des deux équipes
-        data class InfosJoueurs(val j1Nom: String, val j1Prenom: String, val j2Nom: String, val j2Prenom: String)
+        data class InfosJoueurs(val j1Nom: String, val j1Prenom: String, val j2Nom: String, val j2Prenom: String, val defaillante: Boolean)
         fun getInfosJoueurs(numEquipe: Int): InfosJoueurs {
-            var j1Nom = ""; var j1Prenom = ""; var j2Nom = ""; var j2Prenom = ""
+            var j1Nom = ""; var j1Prenom = ""; var j2Nom = ""; var j2Prenom = ""; var defaillante = false
             db.rawQuery(
-                """SELECT j1.nom, j1.prenom, j2.nom, j2.prenom
+                """SELECT j1.nom, j1.prenom, j2.nom, j2.prenom, e.defaillante
                    FROM equipes e
                    JOIN joueurs j1 ON j1.ID = e.id_joueur1
                    JOIN joueurs j2 ON j2.ID = e.id_joueur2
@@ -524,9 +532,10 @@ object DatabaseManager {
                 if (c.moveToFirst()) {
                     j1Nom = c.getString(0); j1Prenom = c.getString(1)
                     j2Nom = c.getString(2); j2Prenom = c.getString(3)
+                    defaillante = c.getInt(4) != 0
                 }
             }
-            return InfosJoueurs(j1Nom, j1Prenom, j2Nom, j2Prenom)
+            return InfosJoueurs(j1Nom, j1Prenom, j2Nom, j2Prenom, defaillante)
         }
         val joueursNS = getInfosJoueurs(equipeNS)
         val joueursEO = getInfosJoueurs(equipeEO)
@@ -569,7 +578,9 @@ object DatabaseManager {
             joueur2EONom = joueursEO.j2Nom,
             joueur2EOPrenom = joueursEO.j2Prenom,
             donnes = listeDonnes,
-            indexDonneAJouer = indexDonneAJouer
+            indexDonneAJouer = indexDonneAJouer,
+            equipeNSDefaillante = joueursNS.defaillante,
+            equipeEODefaillante = joueursEO.defaillante
         )
         Log.i("DatabaseManager", "✅ Mitchell → mvnt=$mvntNumero table=$tableNumero NS=$equipeNS EO=$equipeEO set=$setDonnes donnes=$premiereDonne..$derniereDonne")
         return MouvementResult.Complet(mouvement, tousTermines)
@@ -720,7 +731,7 @@ object DatabaseManager {
         return try {
             db.rawQuery(
                 """SELECT e.equipe_numero, e.id_joueur1, j1.nom AS joueur1_nom, j1.prenom AS joueur1_prenom,
-                          e.id_joueur2, j2.nom AS joueur2_nom, j2.prenom AS joueur2_prenom
+                          e.id_joueur2, j2.nom AS joueur2_nom, j2.prenom AS joueur2_prenom, e.defaillante
                    FROM equipes e
                    JOIN joueurs j1 ON j1.ID = e.id_joueur1
                    JOIN joueurs j2 ON j2.ID = e.id_joueur2
@@ -739,7 +750,8 @@ object DatabaseManager {
                         cursor.getString(cursor.getColumnIndexOrThrow("joueur2_nom")),
                         cursor.getString(cursor.getColumnIndexOrThrow("joueur2_prenom"))
                     )
-                    equipes.add(Equipe(numero, joueur1, joueur2, idTournoi))
+                    val defaillante = cursor.getInt(cursor.getColumnIndexOrThrow("defaillante")) != 0
+                    equipes.add(Equipe(numero, joueur1, joueur2, idTournoi, defaillante))
                 }
             }
             Log.i("DatabaseManager", "✅ ${equipes.size} équipes pour tournoi $idTournoi")
@@ -979,7 +991,8 @@ object DatabaseManager {
                     SELECT m.*, jns1.nom AS ns_j1_nom, jns1.prenom AS ns_j1_prenom,
                         jns2.nom AS ns_j2_nom, jns2.prenom AS ns_j2_prenom,
                         jeo1.nom AS eo_j1_nom, jeo1.prenom AS eo_j1_prenom,
-                        jeo2.nom AS eo_j2_nom, jeo2.prenom AS eo_j2_prenom
+                        jeo2.nom AS eo_j2_nom, jeo2.prenom AS eo_j2_prenom,
+                        ns.defaillante AS ns_defaillante, eo.defaillante AS eo_defaillante
                     FROM $typeDeTournoi m
                     JOIN equipes ns ON ns.equipe_numero = m.equipe_NS AND ns.id_tournoi = ?
                     JOIN joueurs jns1 ON jns1.ID = ns.id_joueur1
@@ -1026,7 +1039,9 @@ object DatabaseManager {
                             joueur2EONom = cursorMv.getString(cursorMv.getColumnIndexOrThrow("eo_j2_nom")),
                             joueur2EOPrenom = cursorMv.getString(cursorMv.getColumnIndexOrThrow("eo_j2_prenom")),
                             donnes = listeDonnes,
-                            indexDonneAJouer = indexDonneAJouer
+                            indexDonneAJouer = indexDonneAJouer,
+                            equipeNSDefaillante = cursorMv.getInt(cursorMv.getColumnIndexOrThrow("ns_defaillante")) != 0,
+                            equipeEODefaillante = cursorMv.getInt(cursorMv.getColumnIndexOrThrow("eo_defaillante")) != 0
                         )
                         Log.i("DatabaseManager", "🎯 Mouvement Howell reconstruit → OK")
                         MouvementResult.Complet(mvnt, tousTermines)
@@ -1056,14 +1071,15 @@ object DatabaseManager {
         val resultats = mutableListOf<ClassementManager.ResultatLigne>()
         val db = DatabaseHelper.getDatabase(context)
         try {
-            db.rawQuery("SELECT numero_donne, numero_table, equipeNS, equipeEO, pointsNS, pointsEO FROM resultats WHERE id_tournoi = ? ORDER BY numero_donne ASC, numero_table ASC", arrayOf(idTournoi.toString())).use { cursor ->
+            db.rawQuery("SELECT numero_donne, numero_table, equipeNS, equipeEO, pointsNS, pointsEO, type_correction FROM resultats WHERE id_tournoi = ? ORDER BY numero_donne ASC, numero_table ASC", arrayOf(idTournoi.toString())).use { cursor ->
                 while (cursor.moveToNext()) {
                     resultats.add(
                         ClassementManager.ResultatLigne(
                         numeroDonne = cursor.getInt(0), numeroTable = cursor.getInt(1),
                         equipeNS = cursor.getInt(2), equipeEO = cursor.getInt(3),
                         pointsNS = if (cursor.isNull(4)) null else cursor.getInt(4),
-                        pointsEO = if (cursor.isNull(5)) null else cursor.getInt(5)
+                        pointsEO = if (cursor.isNull(5)) null else cursor.getInt(5),
+                        typeCorrection = if (cursor.isNull(6)) null else cursor.getString(6)
                     ))
                 }
             }
@@ -1322,7 +1338,7 @@ object DatabaseManager {
         val list = mutableListOf<DonneResultatDetail>()
         val query = """SELECT r.numero_donne, r.equipeNS, r.equipeEO, r.contrat, r.declarant,
                r.resultat_contrat, r.nombre_pli, r.carteEntame,
-               r.pointsNS, r.pointsEO, r.ptsNS, r.ptsEO, dv.vulnerable
+               r.pointsNS, r.pointsEO, r.ptsNS, r.ptsEO, dv.vulnerable, r.type_correction
             FROM resultats r
             JOIN donnes_d_v dv ON dv.ID_donnes_d_v = r.numero_donne
             WHERE r.id_tournoi = ? ORDER BY r.numero_donne ASC""".trimIndent()
@@ -1344,7 +1360,8 @@ object DatabaseManager {
                                 pointsEO = cursor.getInt(9),
                                 ptsNS = cursor.getDouble(10),
                                 ptsEO = cursor.getDouble(11),
-                                vulnerable = cursor.getString(12) ?: "P"
+                                vulnerable = cursor.getString(12) ?: "P",
+                                typeCorrection = if (cursor.isNull(13)) null else cursor.getString(13)
                             )
                         )
                     } while (cursor.moveToNext())
@@ -1407,7 +1424,7 @@ object DatabaseManager {
                         idTournoi = idTournoi
                     )
                     db.rawQuery(
-                        """SELECT j1.ID, j1.nom, j1.prenom, j2.ID, j2.nom, j2.prenom
+                        """SELECT j1.ID, j1.nom, j1.prenom, j2.ID, j2.nom, j2.prenom, e.defaillante
                        FROM equipes e
                        JOIN joueurs j1 ON j1.ID = e.id_joueur1
                        JOIN joueurs j2 ON j2.ID = e.id_joueur2
@@ -1418,7 +1435,8 @@ object DatabaseManager {
                             equipeNumero = nsNum,
                             joueur1 = Joueur(c.getInt(0), c.getString(1), c.getString(2)),
                             joueur2 = Joueur(c.getInt(3), c.getString(4), c.getString(5)),
-                            idTournoi = idTournoi
+                            idTournoi = idTournoi,
+                            defaillante = c.getInt(6) != 0
                         )
                     }
 
@@ -1430,7 +1448,7 @@ object DatabaseManager {
                         idTournoi = idTournoi
                     )
                     db.rawQuery(
-                        """SELECT j1.ID, j1.nom, j1.prenom, j2.ID, j2.nom, j2.prenom
+                        """SELECT j1.ID, j1.nom, j1.prenom, j2.ID, j2.nom, j2.prenom, e.defaillante
                        FROM equipes e
                        JOIN joueurs j1 ON j1.ID = e.id_joueur1
                        JOIN joueurs j2 ON j2.ID = e.id_joueur2
@@ -1441,7 +1459,8 @@ object DatabaseManager {
                             equipeNumero = eoNum,
                             joueur1 = Joueur(c.getInt(0), c.getString(1), c.getString(2)),
                             joueur2 = Joueur(c.getInt(3), c.getString(4), c.getString(5)),
-                            idTournoi = idTournoi
+                            idTournoi = idTournoi,
+                            defaillante = c.getInt(6) != 0
                         )
                     }
 
@@ -1485,7 +1504,7 @@ object DatabaseManager {
                         idTournoi = idTournoi
                     )
                     db.rawQuery(
-                        """SELECT j1.ID, j1.nom, j1.prenom, j2.ID, j2.nom, j2.prenom
+                        """SELECT j1.ID, j1.nom, j1.prenom, j2.ID, j2.nom, j2.prenom, e.defaillante
                            FROM equipes e
                            JOIN joueurs j1 ON j1.ID = e.id_joueur1
                            JOIN joueurs j2 ON j2.ID = e.id_joueur2
@@ -1496,7 +1515,8 @@ object DatabaseManager {
                             equipeNumero = nsNum,
                             joueur1 = Joueur(c.getInt(0), c.getString(1), c.getString(2)),
                             joueur2 = Joueur(c.getInt(3), c.getString(4), c.getString(5)),
-                            idTournoi = idTournoi
+                            idTournoi = idTournoi,
+                            defaillante = c.getInt(6) != 0
                         )
                     }
 
@@ -1507,7 +1527,7 @@ object DatabaseManager {
                         idTournoi = idTournoi
                     )
                     db.rawQuery(
-                        """SELECT j1.ID, j1.nom, j1.prenom, j2.ID, j2.nom, j2.prenom
+                        """SELECT j1.ID, j1.nom, j1.prenom, j2.ID, j2.nom, j2.prenom, e.defaillante
                            FROM equipes e
                            JOIN joueurs j1 ON j1.ID = e.id_joueur1
                            JOIN joueurs j2 ON j2.ID = e.id_joueur2
@@ -1518,7 +1538,8 @@ object DatabaseManager {
                             equipeNumero = eoNum,
                             joueur1 = Joueur(c.getInt(0), c.getString(1), c.getString(2)),
                             joueur2 = Joueur(c.getInt(3), c.getString(4), c.getString(5)),
-                            idTournoi = idTournoi
+                            idTournoi = idTournoi,
+                            defaillante = c.getInt(6) != 0
                         )
                     }
 
@@ -1545,7 +1566,8 @@ object DatabaseManager {
             jNS1.ID AS jns1_id, jNS1.nom AS jns1_nom, jNS1.prenom AS jns1_prenom,
             jNS2.ID AS jns2_id, jNS2.nom AS jns2_nom, jNS2.prenom AS jns2_prenom,
             jEO1.ID AS jeo1_id, jEO1.nom AS jeo1_nom, jEO1.prenom AS jeo1_prenom,
-            jEO2.ID AS jeo2_id, jEO2.nom AS jeo2_nom, jEO2.prenom AS jeo2_prenom
+            jEO2.ID AS jeo2_id, jEO2.nom AS jeo2_nom, jEO2.prenom AS jeo2_prenom,
+            eNS.defaillante AS ns_defaillante, eEO.defaillante AS eo_defaillante
         FROM $typeTournoi t
         INNER JOIN equipes eNS ON eNS.equipe_numero = t.equipe_NS
         INNER JOIN equipes eEO ON eEO.equipe_numero = t.equipe_EO
@@ -1570,7 +1592,8 @@ object DatabaseManager {
                             cursor.getString(cursor.getColumnIndexOrThrow("jns2_nom")),
                             cursor.getString(cursor.getColumnIndexOrThrow("jns2_prenom"))
                         ),
-                        idTournoi = idTournoi
+                        idTournoi = idTournoi,
+                        defaillante = cursor.getInt(cursor.getColumnIndexOrThrow("ns_defaillante")) != 0
                     )
                     val equipeEOObj = Equipe(
                         equipeNumero = cursor.getInt(cursor.getColumnIndexOrThrow("equipe_EO")),
@@ -1584,7 +1607,8 @@ object DatabaseManager {
                             cursor.getString(cursor.getColumnIndexOrThrow("jeo2_nom")),
                             cursor.getString(cursor.getColumnIndexOrThrow("jeo2_prenom"))
                         ),
-                        idTournoi = idTournoi
+                        idTournoi = idTournoi,
+                        defaillante = cursor.getInt(cursor.getColumnIndexOrThrow("eo_defaillante")) != 0
                     )
                     entries.add(
                         ChangementDeMouvementEntry(
@@ -2048,6 +2072,180 @@ object DatabaseManager {
             DatabaseHelper.closeDatabaseAndWait()
             finaliserClassementTournoi(context, idTournoi)
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Erreur sur une donne (moyenne individuelle) — Organisateur uniquement
+    // Marque/démarque une ligne "resultats" comme injouable/erronée, sans faute
+    // d'une équipe. ClassementManager recalcule alors le score de cette donne
+    // pour NS et EO à partir de la moyenne individuelle de chaque équipe.
+    // ─────────────────────────────────────────────────────────────────────────
+    fun marquerErreurDonne(
+        context: Context, idTournoi: Int, numeroDonne: Int, equipeNS: Int, equipeEO: Int,
+        enErreur: Boolean
+    ): Boolean {
+        val db = DatabaseHelper.getDatabase(context)
+        return try {
+            db.beginTransaction()
+            val values = ContentValues().apply {
+                if (enErreur) put("type_correction", ClassementManager.TYPE_ERREUR_MOYENNE_IND)
+                else putNull("type_correction")
+            }
+            val rows = db.update(
+                "resultats", values,
+                "id_tournoi=? AND numero_donne=? AND equipeNS=?",
+                arrayOf(idTournoi.toString(), numeroDonne.toString(), equipeNS.toString())
+            )
+            db.setTransactionSuccessful()
+            Log.i("DatabaseManager", "✅ marquerErreurDonne OK — $rows ligne(s) modifiée(s) (enErreur=$enErreur)")
+            rows > 0
+        } catch (e: Exception) {
+            Log.e("DatabaseManager", "❌ marquerErreurDonne : ${e.message}", e)
+            false
+        } finally {
+            db.endTransaction()
+            DatabaseHelper.closeDatabaseAndWait()
+            enregistrerErreurLog(
+                context, idTournoi, equipeNS, "CorrectionOrganisateur",
+                if (enErreur)
+                    "Donne $numeroDonne marquée en erreur (moyenne individuelle) — Éq.$equipeNS vs Éq.$equipeEO"
+                else
+                    "Donne $numeroDonne — erreur annulée, retour au calcul normal — Éq.$equipeNS vs Éq.$equipeEO"
+            )
+            finaliserClassementTournoi(context, idTournoi)
+        }
+    }
+
+    // Code arbitre du tournoi, défini par l'organisateur à la création. Retourne
+    // null si non défini/vide (le bouton "Arbitre" reste alors masqué côté table).
+    fun getCodeArbitre(context: Context, idTournoi: Int): String? {
+        val db = DatabaseHelper.getDatabase(context)
+        return try {
+            var code: String? = null
+            db.rawQuery("SELECT code_arbitre FROM tournois WHERE ID = ?", arrayOf(idTournoi.toString())).use { c ->
+                if (c.moveToFirst() && !c.isNull(0)) code = c.getString(0)
+            }
+            if (code.isNullOrEmpty()) null else code
+        } catch (e: Exception) {
+            Log.e("DatabaseManager", "❌ getCodeArbitre : ${e.message}", e)
+            null
+        } finally {
+            DatabaseHelper.closeDatabase()
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Appel arbitre depuis la table : la donne n'a pas pu être jouée normalement
+    // (litige, donne injouable). On enregistre une ligne "resultats" placeholder
+    // (contrat="0" = pas de contrat, déjà reconnu ailleurs) via enregistreDonne
+    // pour faire avancer le mouvement normalement, puis on la marque aussitôt en
+    // erreur (moyenne individuelle) — pas de contrat réel à saisir à la table.
+    // ─────────────────────────────────────────────────────────────────────────
+    fun enregistrerDonneArbitre(
+        context: Context, idTournoi: Int, mvntNumero: Int, equipeNS: Int, equipeEO: Int,
+        numeroTable: Int, numeroDonne: Int, indexDonneJouee: Int
+    ): Int {
+        val indexDonneAJouer = enregistreDonne(
+            context, idTournoi, mvntNumero, equipeNS, equipeEO, numeroTable, numeroDonne, indexDonneJouee,
+            contrat = "0", declarant = "", resultatContrat = "=", points = 0, nombrePlis = 0, carteEntame = "",
+            historiqueJson = "[]", mainsJson = "[]"
+        )
+        if (indexDonneAJouer >= 0) {
+            marquerErreurDonne(context, idTournoi, numeroDonne, equipeNS, equipeEO, enErreur = true)
+        }
+        return indexDonneAJouer
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Défaillance d'équipe — décision organisateur (Loi 12.C.2.a WBF/FFB)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // Déclare (ou annule) la défaillance d'une équipe pour ce tournoi. Ne touche
+    // jamais aux joueurs/noms — seule la ligne equipes.defaillante de CE tournoi
+    // est modifiée. Aucune donne n'est pré-remplie ici : tout se joue à la volée
+    // dans passerTableDefaillance, au moment où une vraie table rencontre cette
+    // équipe (mirroring la table Relais existante).
+    fun declarerEquipeDefaillante(context: Context, idTournoi: Int, equipeNumero: Int, defaillante: Boolean): Boolean {
+        val db = DatabaseHelper.getDatabase(context)
+        val ok = try {
+            val rows = db.update(
+                "equipes",
+                ContentValues().apply { put("defaillante", if (defaillante) 1 else 0) },
+                "id_tournoi=? AND equipe_numero=?",
+                arrayOf(idTournoi.toString(), equipeNumero.toString())
+            )
+            Log.i("DatabaseManager", "✅ declarerEquipeDefaillante équipe=$equipeNumero defaillante=$defaillante ($rows ligne(s))")
+            rows > 0
+        } catch (e: Exception) {
+            Log.e("DatabaseManager", "❌ declarerEquipeDefaillante : ${e.message}", e)
+            false
+        } finally {
+            DatabaseHelper.closeDatabase()
+        }
+        enregistrerErreurLog(
+            context, idTournoi, equipeNumero, "Defaillance",
+            if (defaillante) "Équipe $equipeNumero déclarée défaillante"
+            else "Défaillance annulée pour l'équipe $equipeNumero"
+        )
+        return ok
+    }
+
+    // Appelée côté table (organisateur ou autre joueur) quand elle détecte que son
+    // adversaire de la ronde est une équipe défaillante. Enregistre une ligne
+    // placeholder (contrat="0", même sentinel que le bouton Arbitre) pour chaque
+    // donne de la ronde, flaguée DEFAILLANCE_NS/EO selon le côté occupé par
+    // l'équipe défaillante — puis fait avancer la progression des deux équipes
+    // (enregistreDonne s'en charge déjà pour equipeNS ET equipeEO à chaque appel).
+    // Protège les donnes déjà réellement jouées (ne les écrase jamais).
+    fun passerTableDefaillance(
+        context: Context, idTournoi: Int, mvntNumero: Int, equipeNS: Int, equipeEO: Int,
+        equipeDefaillante: Int, numeroTable: Int, numerosDonnes: List<Int>, indexDonneJouee: Int
+    ): Boolean {
+        val typeCorrection = if (equipeDefaillante == equipeNS)
+            ClassementManager.TYPE_DEFAILLANCE_NS else ClassementManager.TYPE_DEFAILLANCE_EO
+
+        var indexCourant = indexDonneJouee
+        var ok = true
+        for (numeroDonne in numerosDonnes) {
+            val db = DatabaseHelper.getDatabase(context)
+            val dejaJouee = try {
+                db.rawQuery(
+                    "SELECT 1 FROM resultats WHERE id_tournoi=? AND numero_donne=? AND equipeNS=? LIMIT 1",
+                    arrayOf(idTournoi.toString(), numeroDonne.toString(), equipeNS.toString())
+                ).use { it.moveToFirst() }
+            } finally { DatabaseHelper.closeDatabase() }
+
+            if (dejaJouee) {
+                Log.i("DatabaseManager", "⏭️ passerTableDefaillance : donne $numeroDonne déjà jouée, non touchée")
+                indexCourant++
+                continue
+            }
+
+            val indexSuivant = enregistreDonne(
+                context, idTournoi, mvntNumero, equipeNS, equipeEO, numeroTable, numeroDonne, indexCourant,
+                contrat = "0", declarant = "", resultatContrat = "=", points = 0, nombrePlis = 0, carteEntame = "",
+                historiqueJson = "[]", mainsJson = "[]"
+            )
+            if (indexSuivant < 0) { ok = false; continue }
+            indexCourant = indexSuivant
+
+            val dbUpdate = DatabaseHelper.getDatabase(context)
+            try {
+                dbUpdate.update(
+                    "resultats",
+                    ContentValues().apply { put("type_correction", typeCorrection) },
+                    "id_tournoi=? AND numero_donne=? AND equipeNS=?",
+                    arrayOf(idTournoi.toString(), numeroDonne.toString(), equipeNS.toString())
+                )
+            } finally { DatabaseHelper.closeDatabase() }
+        }
+
+        enregistrerErreurLog(
+            context, idTournoi, equipeDefaillante,
+            "Defaillance", "Ronde $mvntNumero traitée en défaillance (table $numeroTable, donnes $numerosDonnes)"
+        )
+        finaliserClassementTournoi(context, idTournoi)
+        return ok
     }
 
     // ─────────────────────────────────────────────────────────────────────────

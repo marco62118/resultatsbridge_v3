@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.resultatsbridge.client.ClientNetworkUtils
+import app.resultatsbridge.common.model.ClassementManager
 import app.resultatsbridge.common.model.DonneResultatDetail
 import app.resultatsbridge.common.ui.components.*
 import app.resultatsbridge.common.utils.calculerPoints
@@ -271,9 +272,12 @@ fun CorrectionResultatScreen(
                             else -> signe
                         }
                         val pts = if (res.pointsNS != 0) res.pointsNS else res.pointsEO
+                        val enErreur = res.typeCorrection == ClassementManager.TYPE_ERREUR_MOYENNE_IND
                         Card(
                             onClick = { resultSelectionne = res; messageRetour = null },
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp),
+                            colors = if (enErreur) CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
+                                     else CardDefaults.cardColors(),
                             elevation = CardDefaults.cardElevation(2.dp)
                         ) {
                             Row(
@@ -286,6 +290,11 @@ fun CorrectionResultatScreen(
                                         fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                     Text("NS Éq.${res.equipeNS}  vs  EO Éq.${res.equipeEO}",
                                         style = MaterialTheme.typography.bodySmall)
+                                    if (enErreur) {
+                                        Text("⚠️ EN ERREUR — moyenne individuelle",
+                                            color = Color(0xFFE65100), fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.bodySmall)
+                                    }
                                 }
                                 Column(horizontalAlignment = Alignment.End) {
                                     Text("${res.declarant} ${res.contrat}", fontWeight = FontWeight.Bold, fontSize = 14.sp)

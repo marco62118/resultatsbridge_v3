@@ -198,8 +198,58 @@ class OrganisateurActivity : BaseActivity() {
                     var showJournalErreurs by remember { mutableStateOf(false) }
                     var journalErreurs by remember { mutableStateOf<List<ErreurLogItem>>(emptyList()) }
                     var showCorrectionResultat by remember { mutableStateOf(false) }
+                    var showErreurDonne by remember { mutableStateOf(false) }
+                    var showDefaillanceEquipe by remember { mutableStateOf(false) }
+                    var showMenuCorrection by remember { mutableStateOf(false) }
                     var importJoueursEnCours by remember { mutableStateOf(false) }
                     var messageImportJoueurs by remember { mutableStateOf<String?>(null) }
+
+                    // ── Menu "Corriger un résultat" : choix entre les types de correction ──
+                    if (showMenuCorrection) {
+                        AlertDialog(
+                            onDismissRequest = { showMenuCorrection = false },
+                            title = { Text("Corriger un résultat") },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Button(
+                                        onClick = {
+                                            showMenuCorrection = false
+                                            showCorrectionResultat = true
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) { Text("✏️ Corriger manuellement (contrat / résultat)") }
+
+                                    // "Erreur sur une donne" : tournois locaux uniquement,
+                                    // et pas pour le type spécial par4equ2t21d (calcul EBL différent).
+                                    if (!modeOnlineState.value && typeTournoiState.value != "par4equ2t21d") {
+                                        OutlinedButton(
+                                            onClick = {
+                                                showMenuCorrection = false
+                                                showErreurDonne = true
+                                            },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFE65100)),
+                                            border = BorderStroke(1.dp, Color(0xFFE65100))
+                                        ) { Text("⚠️ Erreur sur une donne (moyenne individuelle)") }
+
+                                        OutlinedButton(
+                                            onClick = {
+                                                showMenuCorrection = false
+                                                showDefaillanceEquipe = true
+                                            },
+                                            modifier = Modifier.fillMaxWidth(),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFB71C1C)),
+                                            border = BorderStroke(1.dp, Color(0xFFB71C1C))
+                                        ) { Text("🚫 Défaillance d'équipe") }
+                                    }
+                                }
+                            },
+                            confirmButton = {},
+                            dismissButton = {
+                                OutlinedButton(onClick = { showMenuCorrection = false }) { Text("Annuler") }
+                            }
+                        )
+                    }
 
                     // ── Écran de correction des résultats ─────────────────────────
                     if (showCorrectionResultat && idTournoiState.value != null) {
@@ -207,6 +257,24 @@ class OrganisateurActivity : BaseActivity() {
                             idTournoi = idTournoiState.value!!,
                             useLocal = !modeOnlineState.value,
                             onBack = { showCorrectionResultat = false }
+                        )
+                        return@AppScaffold
+                    }
+
+                    // ── Écran "Erreur sur une donne" (moyenne individuelle) ───────
+                    if (showErreurDonne && idTournoiState.value != null) {
+                        app.resultatsbridge.screens.ErreurDonneScreen(
+                            idTournoi = idTournoiState.value!!,
+                            onBack = { showErreurDonne = false }
+                        )
+                        return@AppScaffold
+                    }
+
+                    // ── Écran "Défaillance d'équipe" ───────────────────────────────
+                    if (showDefaillanceEquipe && idTournoiState.value != null) {
+                        app.resultatsbridge.screens.DefaillanceEquipeScreen(
+                            idTournoi = idTournoiState.value!!,
+                            onBack = { showDefaillanceEquipe = false }
                         )
                         return@AppScaffold
                     }
@@ -356,14 +424,15 @@ class OrganisateurActivity : BaseActivity() {
                                     text = {
                                         Column {
                                             Text(
-                                                "Entrez vos identifiants TournoiBridgeOnline :",
+                                                "Entrez l'email et le mot de passe du compte ASSOCIATION du club " +
+                                                        "(pas votre compte personnel adhérent) :",
                                                 style = MaterialTheme.typography.bodyMedium
                                             )
                                             Spacer(Modifier.height(8.dp))
                                             OutlinedTextField(
                                                 value = emailExport,
                                                 onValueChange = { emailExport = it },
-                                                label = { Text("Email", fontWeight = FontWeight.Bold) },
+                                                label = { Text("Email de l'association", fontWeight = FontWeight.Bold) },
                                                 textStyle = ChampTextStyle,
                                                 colors = champColors(),
                                                 modifier = Modifier.fillMaxWidth(),
@@ -566,7 +635,7 @@ class OrganisateurActivity : BaseActivity() {
                             if (idTournoiState.value != null) {
                                 Spacer(Modifier.height(8.dp))
                                 OutlinedButton(
-                                    onClick = { showCorrectionResultat = true },
+                                    onClick = { showMenuCorrection = true },
                                     modifier = Modifier.fillMaxWidth(),
                                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFE65100)),
                                     border = BorderStroke(1.dp, Color(0xFFE65100)),
@@ -930,7 +999,7 @@ class OrganisateurActivity : BaseActivity() {
                                 if (idTournoiState.value != null) {
                                     Spacer(Modifier.height(8.dp))
                                     OutlinedButton(
-                                        onClick = { showCorrectionResultat = true },
+                                        onClick = { showMenuCorrection = true },
                                         modifier = Modifier.fillMaxWidth(),
                                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFE65100)),
                                         border = BorderStroke(1.dp, Color(0xFFE65100)),

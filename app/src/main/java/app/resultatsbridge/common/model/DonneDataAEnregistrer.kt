@@ -14,6 +14,7 @@ data class DonneDataAEnregistrer(
     val equipeEO: Int? = null,
     val numeroTable: Int? = null,
     val historique: List<Tour>? = null,
-    val mains: List<List<String>>? = null
+    val mains: List<List<String>>? = null,
+    val enErreurArbitre: Boolean = false // true = appel arbitre : donne marquée en erreur (moyenne individuelle)
 
 )

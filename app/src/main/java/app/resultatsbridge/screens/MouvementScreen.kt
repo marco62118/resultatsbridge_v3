@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -95,7 +96,8 @@ fun MouvementScreen(
     onVerifierMains: (Int) -> Unit,
     modeJeu: String = "rapide",
     typeTournoi: String = "",
-    onQuitter: () -> Unit = {}
+    onQuitter: () -> Unit = {},
+    codeArbitre: String? = null
 ) {
     val afficherEncheres = modeJeu != "rapide"
     val afficherMains    = modeJeu == "encheres_mains"
@@ -165,6 +167,9 @@ fun MouvementScreen(
     var showAlerteMainsManquantes by remember { mutableStateOf(false) }
     var showDialogQuitter         by remember { mutableStateOf(false) }
     var showConfirmDialog         by remember { mutableStateOf(false) }
+    var showDialogArbitre         by remember { mutableStateOf(false) }
+    var codeArbitreSaisi          by remember { mutableStateOf("") }
+    var erreurCodeArbitre         by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(
         aCliqueSurEntameCarte.value, aCliqueSurEntameCouleur.value,
@@ -225,6 +230,68 @@ fun MouvementScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showDialogQuitter = false }) { Text("Annuler") }
+            }
+        )
+    }
+
+    if (showDialogArbitre) {
+        AlertDialog(
+            onDismissRequest = {
+                showDialogArbitre = false; codeArbitreSaisi = ""; erreurCodeArbitre = null
+            },
+            title = { Text("Appeler l'arbitre", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Cette donne sera marquée en erreur : chaque équipe recevra sa " +
+                                "moyenne individuelle au lieu d'un score réel. Vous allez pouvoir jouer " +
+                                "la donne suivante. Code arbitre requis pour confirmer."
+                    )
+                    androidx.compose.material3.OutlinedTextField(
+                        value = codeArbitreSaisi,
+                        onValueChange = { codeArbitreSaisi = it; erreurCodeArbitre = null },
+                        label = { Text("Code arbitre") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    erreurCodeArbitre?.let {
+                        Text(it, color = Color.Red, fontWeight = FontWeight.Bold)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (codeArbitre != null && codeArbitreSaisi == codeArbitre) {
+                        showDialogArbitre = false
+                        codeArbitreSaisi = ""
+                        onEnregistrerDonne(
+                            DonneDataAEnregistrer(
+                                contrat = "0",
+                                declarant = "",
+                                signe = "=",
+                                points = 0,
+                                plis = 0,
+                                carteEntame = "",
+                                numeroDonne = donneEnCours?.numero ?: 0,
+                                indexDonneJouee = indexDonneAJouer,
+                                mvntNumero = mouvement.mvntNumero,
+                                equipeNS = mouvement.equipeNS,
+                                equipeEO = mouvement.equipeEO,
+                                numeroTable = mouvement.tableNumero,
+                                historique = emptyList(),
+                                mains = null,
+                                enErreurArbitre = true
+                            )
+                        )
+                    } else {
+                        erreurCodeArbitre = "Code incorrect"
+                    }
+                }) { Text("Confirmer") }
+            },
+            dismissButton = {
+                androidx.compose.material3.OutlinedButton(onClick = {
+                    showDialogArbitre = false; codeArbitreSaisi = ""; erreurCodeArbitre = null
+                }) { Text("Annuler") }
             }
         )
     }
@@ -642,13 +709,40 @@ fun MouvementScreen(
         Column(modifier = Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (afficherMains && donneEnCours != null) {
                     Surface(modifier = Modifier.weight(1f), color = Color(0xFF2196F3).copy(alpha = 0.1f), shape = RoundedCornerShape(8.dp)) {
-                        Button(onClick = { onVerifierMains(donneEnCours.numero) }, modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B6B))) {
-                            Icon(imageVector = Icons.Default.Warning, contentDescription = "Attention", tint = Color.Yellow, modifier = Modifier.size(20.dp))
-                            Text(text = "Vérifier les mains \n (seulement en cas d'erreur de cartes)", fontSize = 12.sp, textAlign = TextAlign.Center)
+                        Button(
+                            onClick = { onVerifierMains(donneEnCours.numero) },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B6B))
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(imageVector = Icons.Default.Warning, contentDescription = "Attention", tint = Color.Yellow, modifier = Modifier.size(16.dp))
+                                Text(text = "Vérifier les mains \n (seulement si erreur)", fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 2)
+                            }
+                        }
+                    }
+                } else {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+                if (codeArbitre != null) {
+                    Surface(modifier = Modifier.weight(1f), color = Color(0xFFFF6B6B).copy(alpha = 0.1f), shape = RoundedCornerShape(8.dp)) {
+                        Button(
+                            onClick = { showDialogArbitre = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B6B))
+                        ) {
+                            Text(text = "🧑‍⚖️ Arbitre \n (donne non jouable)", fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 2)
                         }
                     }
                 } else {

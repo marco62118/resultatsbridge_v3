@@ -35,6 +35,7 @@ import app.resultatsbridge.organisateur.data.DatabaseManager
 import app.resultatsbridge.common.model.DonneResultatDetail
 import app.resultatsbridge.common.model.Carte
 import app.resultatsbridge.common.model.AnnonceJoueur
+import app.resultatsbridge.common.model.ClassementManager
 import app.resultatsbridge.common.model.ClassementManager4Equ2T21D
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -79,7 +80,8 @@ fun RowScope.TableCell(
     ) {
         TextSuites(
             text = text,
-            fontSize = if (isHeader) 10.sp else 12.sp,
+            fontSize = if (isHeader) 10.sp else 17.sp,
+            symbolFontSize = if (isHeader) 10.sp else 17.sp,
             fontWeight = FontWeight.Bold,
             textAlign = TextAlign.Center,
             maxLines = if (isHeader) 2 else 1
@@ -299,11 +301,24 @@ private fun LigneSimple(
         val resText = if (item.resultatContrat == "=" || item.resultatContrat == "0")
             "égal" else "${item.resultatContrat} ${item.nombrePli}"
         TableCell(resText, 0.8f, cMod)
-        TableCell(item.carteEntame, 0.8f, cMod)
-        TableCell("${item.pointsNS}", 0.7f, cMod)
-        TableCell("${item.pointsEO}", 0.7f, cMod)
+        TableCell(formatEntame(item.carteEntame), 0.8f, cMod)
+        TableCell(texteScoreOuDefaillance(item, "${item.pointsNS}"), 0.7f, cMod)
+        TableCell(texteScoreOuDefaillance(item, "${item.pointsEO}"), 0.7f, cMod)
     }
 }
+
+private fun texteOuErreur(item: DonneResultatDetail, texte: String): String = when (item.typeCorrection) {
+    ClassementManager.TYPE_ERREUR_MOYENNE_IND -> "erreur"
+    ClassementManager.TYPE_DEFAILLANCE_NS, ClassementManager.TYPE_DEFAILLANCE_EO -> "défaillance"
+    else -> texte
+}
+
+// Contrairement à "erreur" (un vrai contrat a été joué, le score brut reste
+// affichable), une donne en défaillance n'a jamais de contrat réel : le score
+// brut ("Score NS/EO") est un placeholder sans signification, à remplacer aussi.
+private fun texteScoreOuDefaillance(item: DonneResultatDetail, texte: String): String =
+    if (item.typeCorrection == ClassementManager.TYPE_DEFAILLANCE_NS ||
+        item.typeCorrection == ClassementManager.TYPE_DEFAILLANCE_EO) "défaillance" else texte
 
 // =============================================================================
 // ResultatsDetailsScreen
@@ -632,11 +647,11 @@ fun ResultatsDetailsScreen(
                                         if (item.resultatContrat == "=" || item.resultatContrat == "0")
                                             "égal" else "${item.resultatContrat} ${item.nombrePli}"
                                     TableCell(resText, 0.8f, cMod)
-                                    TableCell(item.carteEntame, 0.8f, cMod)
-                                    TableCell("${item.pointsNS}", 0.7f, cMod)
-                                    TableCell("${item.pointsEO}", 0.7f, cMod)
-                                    TableCell(formatPts(item.ptsNS), 0.6f, cMod)
-                                    TableCell(formatPts(item.ptsEO), 0.6f, cMod)
+                                    TableCell(formatEntame(item.carteEntame), 0.8f, cMod)
+                                    TableCell(texteScoreOuDefaillance(item, "${item.pointsNS}"), 0.7f, cMod)
+                                    TableCell(texteScoreOuDefaillance(item, "${item.pointsEO}"), 0.7f, cMod)
+                                    TableCell(texteOuErreur(item, formatPts(item.ptsNS)), 0.6f, cMod)
+                                    TableCell(texteOuErreur(item, formatPts(item.ptsEO)), 0.6f, cMod)
                                 }
                             }
                         }

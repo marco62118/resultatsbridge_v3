@@ -267,6 +267,72 @@ class ClientServeurHTTP(port: Int = 8080, private val context: Context) : NanoHT
                 )
             }
 
+            uri.startsWith("/enregistrerDonneArbitre") -> {
+                val files: MutableMap<String, String> = HashMap()
+                session.parseBody(files)
+                val receivedJson = files["postData"] ?: files["__CONTENT__"] ?: files["content"] ?: ""
+                val rawMap = if (receivedJson.isNotEmpty()) Gson().fromJson(receivedJson, Map::class.java) else null
+                val parmsMap = (rawMap as? Map<*, *>)?.filterKeys { it is String } as? Map<String, Any?> ?: emptyMap()
+
+                val idTournoi       = (parmsMap["idTournoi"] as? Double)?.toInt() ?: 0
+                val mvntNumero      = (parmsMap["mvntNumero"] as? Double)?.toInt() ?: 0
+                val equipeNS        = (parmsMap["equipeNS"] as? Double)?.toInt() ?: 0
+                val equipeEO        = (parmsMap["equipeEO"] as? Double)?.toInt() ?: 0
+                val numeroTable     = (parmsMap["numeroTable"] as? Double)?.toInt() ?: 0
+                val numeroDonne     = (parmsMap["numeroDonne"] as? Double)?.toInt() ?: 0
+                val indexDonneJouee = (parmsMap["indexDonneJouee"] as? Double)?.toInt() ?: 0
+
+                Log.i("ClientServeurHTTP", "🧑‍⚖️ /enregistrerDonneArbitre tournoi=$idTournoi donne=$numeroDonne NS=$equipeNS EO=$equipeEO")
+
+                val indexDonneAJouer = DatabaseManager.enregistrerDonneArbitre(
+                    context, idTournoi, mvntNumero, equipeNS, equipeEO, numeroTable, numeroDonne, indexDonneJouee
+                )
+
+                return newFixedLengthResponse(
+                    Response.Status.OK,
+                    "application/json",
+                    "{\"indexDonneAJouer\": $indexDonneAJouer}"
+                )
+            }
+
+            uri.startsWith("/passerTableDefaillance") -> {
+                val files: MutableMap<String, String> = HashMap()
+                session.parseBody(files)
+                val receivedJson = files["postData"] ?: files["__CONTENT__"] ?: files["content"] ?: ""
+                val rawMap = if (receivedJson.isNotEmpty()) Gson().fromJson(receivedJson, Map::class.java) else null
+                val parmsMap = (rawMap as? Map<*, *>)?.filterKeys { it is String } as? Map<String, Any?> ?: emptyMap()
+
+                val idTournoi         = (parmsMap["idTournoi"] as? Double)?.toInt() ?: 0
+                val mvntNumero        = (parmsMap["mvntNumero"] as? Double)?.toInt() ?: 0
+                val equipeNS          = (parmsMap["equipeNS"] as? Double)?.toInt() ?: 0
+                val equipeEO          = (parmsMap["equipeEO"] as? Double)?.toInt() ?: 0
+                val equipeDefaillante = (parmsMap["equipeDefaillante"] as? Double)?.toInt() ?: 0
+                val numeroTable       = (parmsMap["numeroTable"] as? Double)?.toInt() ?: 0
+                val indexDonneJouee   = (parmsMap["indexDonneJouee"] as? Double)?.toInt() ?: 0
+                val numerosDonnes     = (parmsMap["numerosDonnes"] as? List<*>)?.mapNotNull { (it as? Double)?.toInt() } ?: emptyList()
+
+                Log.i("ClientServeurHTTP", "🚫 /passerTableDefaillance tournoi=$idTournoi mvnt=$mvntNumero défaillante=$equipeDefaillante donnes=$numerosDonnes")
+
+                val ok = DatabaseManager.passerTableDefaillance(
+                    context, idTournoi, mvntNumero, equipeNS, equipeEO,
+                    equipeDefaillante, numeroTable, numerosDonnes, indexDonneJouee
+                )
+
+                return newFixedLengthResponse(
+                    Response.Status.OK,
+                    "application/json",
+                    "{\"ok\": $ok}"
+                )
+            }
+
+            uri.startsWith("/getCodeArbitre") -> {
+                val params = session.parameters
+                val idTournoi = params["idTournoi"]?.firstOrNull()?.toIntOrNull() ?: 0
+                val code = DatabaseManager.getCodeArbitre(context, idTournoi)
+                val json = JSONObject().apply { put("codeArbitre", code ?: "") }
+                return newFixedLengthResponse(Response.Status.OK, "application/json", json.toString())
+            }
+
             uri.startsWith("/passerTableRelais") -> {
                 val params = session.parameters
                 val idTournoi = params["idTournoi"]?.firstOrNull()?.toIntOrNull()
@@ -680,11 +746,93 @@ class ClientServeurHTTP(port: Int = 8080, private val context: Context) : NanoHT
                 }
             }*/
 
+            // ─────────────────────────────────────────────────────────────
+            // Préparation d'un tournoi préétabli (donnes cibles + avant tournoi)
+            // en réseau local — aucun idTournoi requis, mêmes sentinels que
+            // DatabaseManager (id_tournoi=-1 cibles, id_tournoi=0 avant tournoi).
+            // ─────────────────────────────────────────────────────────────
+
+            uri.startsWith("/getDonnesCibles") -> {
+                val donnes = DatabaseManager.getDonnesCibles(context)
+                newFixedLengthResponse(Response.Status.OK, "application/json", jsonDonnes(donnes))
+            }
+
+            uri.startsWith("/sauvegarderDonneCible") -> {
+                val (numeroDonne, mains) = lireNumeroDonneEtMains(session) ?: return newFixedLengthResponse(
+                    Response.Status.BAD_REQUEST, "application/json", """{"etat":"ERREUR_PARAM"}"""
+                )
+                val ok = DatabaseManager.sauvegarderDonneCible(context, numeroDonne, mains)
+                Log.i("ClientServeurHTTP", "${if (ok) "✅" else "❌"} /sauvegarderDonneCible donne=$numeroDonne")
+                newFixedLengthResponse(Response.Status.OK, "application/json", """{"etat":"${if (ok) "OK" else "ERREUR"}"}""")
+            }
+
+            uri.startsWith("/supprimerDonneCible") -> {
+                val numeroDonne = lireNumeroDonne(session)
+                val ok = if (numeroDonne != null) DatabaseManager.supprimerDonneCible(context, numeroDonne) else false
+                newFixedLengthResponse(Response.Status.OK, "application/json", """{"etat":"${if (ok) "OK" else "ERREUR"}"}""")
+            }
+
+            uri.startsWith("/getMainsAvantTournoi") -> {
+                val donnes = DatabaseManager.getMainsAvantTournoi(context)
+                newFixedLengthResponse(Response.Status.OK, "application/json", jsonDonnes(donnes))
+            }
+
+            uri.startsWith("/sauvegarderMainsAvantTournoi") -> {
+                val (numeroDonne, mains) = lireNumeroDonneEtMains(session) ?: return newFixedLengthResponse(
+                    Response.Status.BAD_REQUEST, "application/json", """{"etat":"ERREUR_PARAM"}"""
+                )
+                val ok = DatabaseManager.sauvegarderMainsAvantTournoi(context, numeroDonne, mains)
+                Log.i("ClientServeurHTTP", "${if (ok) "✅" else "❌"} /sauvegarderMainsAvantTournoi donne=$numeroDonne")
+                newFixedLengthResponse(Response.Status.OK, "application/json", """{"etat":"${if (ok) "OK" else "ERREUR"}"}""")
+            }
+
+            uri.startsWith("/supprimerMainsAvantTournoi") -> {
+                val ok = DatabaseManager.supprimerMainsAvantTournoi(context)
+                newFixedLengthResponse(Response.Status.OK, "application/json", """{"etat":"${if (ok) "OK" else "ERREUR"}"}""")
+            }
+
             else -> newFixedLengthResponse("Erreur 404 : Page non trouvée")
         }
 
 
     }
 
+    // Sérialise une liste de DonneAvantTournoi dans le même format JSON attendu par
+    // ClientNetworkUtils.getMainsAvantTournoi/getDonnesCibles (voir "donnes":[...]).
+    private fun jsonDonnes(donnes: List<app.resultatsbridge.common.model.DonneAvantTournoi>): String {
+        val arr = JSONArray()
+        donnes.forEach { donne ->
+            arr.put(JSONObject().apply {
+                put("numero_donne", donne.numeroDonne)
+                put("donneur", donne.donneur)
+                put("vulnerable", donne.vulnerable)
+                put("mains", JSONArray(donne.mains.map { main -> JSONArray(main) }))
+            })
+        }
+        return JSONObject().apply { put("etat", "OK"); put("donnes", arr) }.toString()
+    }
 
+    // Lit {numeroDonne, mains} dans le corps POST — même convention que /enregistrerMainsRelais.
+    private fun lireNumeroDonneEtMains(session: IHTTPSession): Pair<Int, List<List<String>>>? {
+        val files: MutableMap<String, String> = HashMap()
+        session.parseBody(files)
+        val receivedJson = files["postData"] ?: files["__CONTENT__"] ?: files["content"] ?: ""
+        val rawMap = if (receivedJson.isNotEmpty()) Gson().fromJson(receivedJson, Map::class.java) else null
+        val parmsMap = (rawMap as? Map<*, *>)?.filterKeys { it is String } as? Map<String, Any?> ?: emptyMap()
+        val numeroDonne = (parmsMap["numeroDonne"] as? Double)?.toInt() ?: return null
+        val mainsList = parmsMap["mains"] as? List<*> ?: return null
+        val mains: List<List<String>> = mainsList.mapNotNull { main -> (main as? List<*>)?.mapNotNull { it as? String } }
+        if (mains.size != 4 || mains.any { it.size != 13 }) return null
+        return numeroDonne to mains
+    }
+
+    // Lit {numeroDonne} dans le corps POST.
+    private fun lireNumeroDonne(session: IHTTPSession): Int? {
+        val files: MutableMap<String, String> = HashMap()
+        session.parseBody(files)
+        val receivedJson = files["postData"] ?: files["__CONTENT__"] ?: files["content"] ?: ""
+        val rawMap = if (receivedJson.isNotEmpty()) Gson().fromJson(receivedJson, Map::class.java) else null
+        val parmsMap = (rawMap as? Map<*, *>)?.filterKeys { it is String } as? Map<String, Any?> ?: emptyMap()
+        return (parmsMap["numeroDonne"] as? Double)?.toInt()
+    }
 }
