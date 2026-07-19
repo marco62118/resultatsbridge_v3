@@ -45,7 +45,8 @@ object DatabaseHelper {
         val aAjouter = mapOf(
             "nbre_mouvements"      to "INTEGER NOT NULL DEFAULT 0",
             "nbre_donnes_par_table" to "INTEGER NOT NULL DEFAULT 0",
-            "nbre_tables"          to "INTEGER NOT NULL DEFAULT 0"
+            "nbre_tables"          to "INTEGER NOT NULL DEFAULT 0",
+            "code_arbitre"         to "TEXT DEFAULT NULL"
         )
         aAjouter.forEach { (col, def) ->
             if (col !in colonnesExistantes) {
@@ -53,9 +54,12 @@ object DatabaseHelper {
                 Log.i("DatabaseHelper", "🔧 Colonne ajoutée : $col")
             }
         }
-        if ("nbre_donne" in colonnesExistantes && "nbre_donne_total" !in colonnesExistantes) {
-            database.execSQL("ALTER TABLE tournois RENAME COLUMN nbre_donne TO nbre_donne_total")
-            Log.i("DatabaseHelper", "🔧 Colonne renommée : nbre_donne → nbre_donne_total")
+        if ("nbre_donne_total" !in colonnesExistantes) {
+            database.execSQL("ALTER TABLE tournois ADD COLUMN nbre_donne_total INTEGER NOT NULL DEFAULT 0")
+            if ("nbre_donne" in colonnesExistantes) {
+                database.execSQL("UPDATE tournois SET nbre_donne_total = nbre_donne")
+            }
+            Log.i("DatabaseHelper", "🔧 Colonne ajoutée : nbre_donne_total")
         }
         // Ajouter MitchellGuéridon dans la table type si absent (tables=0 = type dynamique)
         database.rawQuery("SELECT COUNT(*) FROM type WHERE type = 'MitchellGueridon'", null).use { c ->
@@ -72,6 +76,26 @@ object DatabaseHelper {
         if ("par_texte" !in colonnesDonnes) {
             database.execSQL("ALTER TABLE donnes ADD COLUMN par_texte TEXT DEFAULT NULL")
             Log.i("DatabaseHelper", "🔧 Colonne ajoutée : donnes.par_texte")
+        }
+
+        // Ajouter defaillante dans equipes si absent (Défaillance d'équipe)
+        val colonnesEquipes = mutableSetOf<String>()
+        database.rawQuery("PRAGMA table_info(equipes)", null).use { c ->
+            while (c.moveToNext()) colonnesEquipes.add(c.getString(c.getColumnIndexOrThrow("name")))
+        }
+        if ("defaillante" !in colonnesEquipes) {
+            database.execSQL("ALTER TABLE equipes ADD COLUMN defaillante INTEGER DEFAULT 0")
+            Log.i("DatabaseHelper", "🔧 Colonne ajoutée : equipes.defaillante")
+        }
+
+        // Ajouter type_correction dans resultats si absent (Erreur sur une donne / Défaillance)
+        val colonnesResultats = mutableSetOf<String>()
+        database.rawQuery("PRAGMA table_info(resultats)", null).use { c ->
+            while (c.moveToNext()) colonnesResultats.add(c.getString(c.getColumnIndexOrThrow("name")))
+        }
+        if ("type_correction" !in colonnesResultats) {
+            database.execSQL("ALTER TABLE resultats ADD COLUMN type_correction TEXT DEFAULT NULL")
+            Log.i("DatabaseHelper", "🔧 Colonne ajoutée : resultats.type_correction")
         }
 
         database.execSQL(
