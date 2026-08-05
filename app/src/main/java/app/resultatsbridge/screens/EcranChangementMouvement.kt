@@ -22,8 +22,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.resultatsbridge.common.model.ChangementDeMouvement
@@ -51,6 +54,31 @@ private fun TexteGrand(texte: String, couleur: Color = Color.Unspecified) {
         fontSize   = 22.sp,
         fontWeight = FontWeight.ExtraBold,
         color      = couleur
+    )
+}
+
+// Phrase qui peut revenir à la ligne proprement (contrairement à un Row, dont les
+// éléments se retrouvaient empilés à la verticale dès que la phrase devenait longue -
+// signalé par Marco le 05/08/2026 après l'ajout du message de circulation des donnes).
+// Chaque segment est soit du texte normal (couleur = null), soit un mot-clé en gros/gras
+// coloré (couleur non-null) - mélangés dans un seul Text, qui sait retourner à la ligne.
+@Composable
+private fun TextePhrase(vararg segments: Pair<String, Color?>) {
+    Text(
+        text = buildAnnotatedString {
+            segments.forEachIndexed { index, (texte, couleur) ->
+                if (couleur != null) {
+                    withStyle(SpanStyle(fontWeight = FontWeight.ExtraBold, fontSize = 22.sp, color = couleur)) {
+                        append(texte)
+                    }
+                } else {
+                    append(texte)
+                }
+                if (index < segments.lastIndex) append(" ")
+            }
+        },
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onBackground
     )
 }
 
@@ -92,7 +120,7 @@ fun EcranChangementMouvement(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(20.dp)
+            .padding(horizontal = 8.dp, vertical = 20.dp)
             .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Top
@@ -129,14 +157,27 @@ fun EcranChangementMouvement(
                 )
             }
             Spacer(modifier = Modifier.height(16.dp))
-            val entriesTries = if (equipeChoisie != null) {
-                val principale = changement.entries.firstOrNull { entry ->
-                    entry.equipe.equipeNumero == equipeChoisie ||
-                            entry.adversaire.equipeNumero == equipeChoisie
+            // Mitchell / MitchellGuéridon : NS ne bouge jamais, son numéro identifie
+            // directement la table PHYSIQUE ou se trouve ce telephone (equipes.first =
+            // le NS qu'on vient de jouer = notre table actuelle). Chercher par
+            // equipeChoisie a la place se trompe de table des que equipeChoisie est le
+            // camp EO (qui bouge) : on retombe alors sur l'entree de la table de
+            // DESTINATION (ou EO apparait comme "adversaire" du mouvement suivant),
+            // pas celle ou le telephone se trouve reellement - bug signale par Marco le
+            // 05/08/2026 ("eq8 restez T4" affiche alors qu'on est physiquement a la
+            // table 3, avec eq7/eq3). Le Howell n'a pas cette propriete (NS n'y est pas
+            // fixe par table), donc garde l'ancienne recherche par equipeChoisie.
+            val entriesTries = when {
+                (estMitchell || estMitchellGueridon) && equipes != null ->
+                    listOfNotNull(changement.entries.firstOrNull { it.equipe.equipeNumero == equipes.first })
+                equipeChoisie != null -> {
+                    val principale = changement.entries.firstOrNull { entry ->
+                        entry.equipe.equipeNumero == equipeChoisie ||
+                                entry.adversaire.equipeNumero == equipeChoisie
+                    }
+                    listOfNotNull(principale)
                 }
-                listOfNotNull(principale)
-            } else {
-                changement.entries
+                else -> changement.entries
             }
             entriesTries.forEachIndexed { index, entry ->
 
@@ -199,6 +240,11 @@ fun EcranChangementMouvement(
 
                         } else if (estMitchell || estMitchellGueridon) {
                             // ── Affichage spécifique Mitchell / Mitchell Guéridon ──────────────
+                            // Écran partagé par les 2 équipes assises à la même table (1 seul
+                            // téléphone par table) : on affiche toujours NS ET EO ensemble, plus
+                            // besoin de choisir une "perspective" côté equipeChoisie. entry.equipe
+                            // = NS et entry.adversaire = EO, toujours dans cet ordre pour Mitchell
+                            // et MitchellGuéridon (voir getFuturMouvement, DatabaseManager.kt).
                             // Skip uniquement pour Mitchell standard (tables paires), jamais pour Guéridon
                             val aSaute = estMitchell && !estMitchellGueridon &&
                                     TournoiConfig.NBRE_TABLES > 0 &&
@@ -206,51 +252,73 @@ fun EcranChangementMouvement(
                                     changement.mvntSuivant > TournoiConfig.NBRE_TABLES / 2
                             val couleurTableMitchell = if (aSaute) Color.Red else couleurTable
 
-                            if (equipeEnPremierEstNS) {
-                                // L'équipe choisie est NS → elle reste sur place
-                                Row(
-                                    verticalAlignment     = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    TexteNormal("Équipe N°")
-                                    TexteGrand("${equipeAffichee.equipeNumero}", couleurNS)
-                                    TexteNormal("vous restez")
-                                    TexteGrand("Table ${entry.tableNumero}", couleurTableMitchell)
+                            // NS reste sur place. Message des donnes (Guéridon uniquement)
+                            // annoncé D'ABORD, suivi de "et restez Table X en NS" - demande
+                            // explicite de Marco le 05/08/2026 (une seule phrase continue,
+                            // au lieu de "vous restez" en premier puis le message des donnes
+                            // sur une ligne séparée en dessous). Voir positionChaineGueridon
+                            // côté DatabaseManager.kt pour la règle (vérifiée à la main sur
+                            // 4 et 6 tables) :
+                            //   - cas général : table (T+1)
+                            //   - table nbreTables/2 : sur le Guéridon
+                            //   - table nbreTables/2+1 : dépose EN PLUS son jeu joué
+                            //     sur le Guéridon (c'est elle qui l'alimente)
+                            //   - dernière table (nbreTables) : récupère à la table 1
+                            //     (elle rejoue toujours le même jeu que la table 1)
+                            val nbreTables    = TournoiConfig.NBRE_TABLES
+                            val tableActuelle = entry.tableNumero
+                            val texteAvantRestez = if (estMitchellGueridon && nbreTables > 0) {
+                                when (tableActuelle) {
+                                    nbreTables ->
+                                        "Récupérez les donnes de la Table 1 et restez"
+                                    nbreTables / 2 ->
+                                        "Prenez votre set de donnes sur le Guéridon et restez"
+                                    nbreTables / 2 + 1 ->
+                                        "Déposez votre set de donnes sur le Guéridon, " +
+                                                "puis prenez votre prochain set à la Table ${tableActuelle + 1} et restez"
+                                    else ->
+                                        "Prenez votre set de donnes à la Table ${tableActuelle + 1} et restez"
                                 }
-                                Row(
-                                    verticalAlignment     = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    TexteNormal("Vos adversaires : Équipe N°")
-                                    TexteGrand("${equipeAdversaire.equipeNumero}", couleurEO)
-                                    TexteNormal("arrive en EO")
-                                }
+                            } else "Vous restez"
+
+                            TextePhrase(
+                                "Équipe" to null,
+                                "${entry.equipe.equipeNumero}" to couleurNS,
+                                texteAvantRestez to null,
+                                "Table ${entry.tableNumero}" to couleurTableMitchell,
+                                "en NS" to null
+                            )
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // EO se déplace : ATTENTION, "entry.adversaire" est l'équipe EO
+                            // qui ARRIVE à notre table (celle qui rejoint NS ci-dessus) - PAS
+                            // l'équipe EO qui vient de jouer ICI et qui doit partir ! Ce n'est
+                            // pas la même équipe des que EO ne reste pas sur place (le cas
+                            // normal). Il faut chercher la propre destination de l'équipe EO
+                            // partante (equipes.second), dans SA future entrée à elle, pas
+                            // dans celle de notre table. Bug signale par Marco le 05/08/2026 :
+                            // "eq4 allez T1" affiche (l'EO qui arrive) alors que l'equipe
+                            // presente a l'ecran (eq1) doit en fait aller Table 2.
+                            val entreePourEO = equipes?.let { (_, eoActuel) ->
+                                changement.entries.firstOrNull { it.adversaire.equipeNumero == eoActuel }
+                            }
+                            val equipeEODepart = entreePourEO?.adversaire ?: entry.adversaire
+                            val tableEODepart  = entreePourEO?.tableNumero ?: entry.tableNumero
+                            if (aSaute) {
+                                TextePhrase(
+                                    "⚠️ Équipe" to null,
+                                    "${equipeEODepart.equipeNumero} sauté à la Table $tableEODepart" to couleurTableMitchell,
+                                    "en EO" to null
+                                )
                             } else {
-                                // L'équipe choisie est EO → elle se déplace
-                                Row(
-                                    verticalAlignment     = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-
-                                    if (aSaute) {
-                                        TexteGrand("⚠️ ") //sauté à la Table ${entry.tableNumero}", Color.Red)
-                                        TexteNormal("Équipe N° ")
-                                        TexteGrand("${equipeAffichee.equipeNumero} sauté à la Table ${entry.tableNumero}", couleurTableMitchell)
-                                    } else {
-                                        TexteNormal("Équipe N°")
-                                        TexteGrand("${equipeAffichee.equipeNumero}", couleurEO)
-                                        TexteNormal(" rendez vous à la ")
-                                        TexteGrand("Table ${entry.tableNumero}", couleurTableMitchell)
-                                    }
-
-                                }
-                                Row(
-                                    verticalAlignment     = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    TexteNormal("vous jouerez contre Équipe NS N°")
-                                    TexteGrand("${equipeAdversaire.equipeNumero}", couleurNS)
-                                }
+                                TextePhrase(
+                                    "Équipe" to null,
+                                    "${equipeEODepart.equipeNumero}" to couleurEO,
+                                    "allez à la" to null,
+                                    "Table $tableEODepart" to couleurTableMitchell,
+                                    "en EO" to null
+                                )
                             }
 
                         } else {

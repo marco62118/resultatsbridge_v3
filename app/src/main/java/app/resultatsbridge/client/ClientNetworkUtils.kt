@@ -1,5 +1,8 @@
 package app.resultatsbridge.client
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.util.Log
 import androidx.compose.runtime.MutableState
 import app.resultatsbridge.common.model.Carte
@@ -25,6 +28,8 @@ import app.resultatsbridge.common.model.DonneResultatDetail
 import app.resultatsbridge.common.model.AnnonceJoueur
 import app.resultatsbridge.common.model.AuthAssociation
 import app.resultatsbridge.common.model.AuthJoueur
+import app.resultatsbridge.common.utils.estTypeMitchellFamille
+import app.resultatsbridge.common.utils.positionMitchell
 import app.resultatsbridge.common.model.CreationTournoiResult
 import app.resultatsbridge.common.model.DonneAvantTournoi
 import app.resultatsbridge.common.model.DonneComplete
@@ -43,6 +48,8 @@ object ClientNetworkUtils {
     private const val port = 8080
     private var tokenApi: String = ""
     private var tokenJoueur: String = ""
+    // Détail de la dernière erreur de testConnection(), pour affichage à l'écran sans adb
+    var dernierErreurConnexion: String? = null
     // 🔧 Initialise l'IP du serveur
     fun initialiserServeur(ip: String) {
         ipServeur = ip
@@ -173,10 +180,52 @@ object ClientNetworkUtils {
         }
     }
 
+    // Réseau Wi-Fi actuellement connecté (déjà rejoint, donc disponible immédiatement sans
+    // attendre de callback). En mode local (point d'accès mobile sans partage Internet),
+    // Android peut faire passer le trafic de l'appli par les données mobiles si elles sont
+    // actives, alors que le serveur n'est joignable que sur le Wi-Fi — on force donc le
+    // Wi-Fi explicitement pour ces requêtes plutôt que de laisser l'OS choisir.
+    fun reseauWifiActif(): android.net.Network? {
+        return try {
+            val cm = BridgeApplication.instance.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            cm?.allNetworks?.firstOrNull { reseau ->
+                cm.getNetworkCapabilities(reseau)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            }
+        } catch (e: Exception) {
+            Log.e("ClientNetworkUtils", "reseauWifiActif erreur : ${e.message}")
+            null
+        }
+    }
+
+    // Verifie que le Wi-Fi actif est bien celui du tournoi (meme sous-reseau que le
+    // serveur), pas juste "un Wi-Fi actif" - un telephone peut rejoindre automatiquement
+    // un autre reseau connu apres avoir perdu le Wi-Fi du tournoi, ce qui ferait croire a
+    // tort que la connexion est normale.
+    private fun estSurReseauDuTournoi(): Boolean {
+        val reseau = reseauWifiActif() ?: return false
+        val serveur = ipServeur ?: return false
+        return try {
+            val cm = BridgeApplication.instance.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            val ipAppareil = cm?.getLinkProperties(reseau)?.linkAddresses
+                ?.firstOrNull { it.address is java.net.Inet4Address }
+                ?.address?.hostAddress
+            ipAppareil != null && ipAppareil.substringBeforeLast(".") == serveur.substringBeforeLast(".")
+        } catch (e: Exception) {
+            Log.e("ClientNetworkUtils", "estSurReseauDuTournoi erreur : ${e.message}")
+            false
+        }
+    }
+
     // Sur Android 6, setDefaultSSLSocketFactory est ignoré par le moteur OkHttp interne.
     // On applique donc la factory directement sur chaque connexion HTTPS.
     private fun ouvrirConnexion(urlStr: String): HttpURLConnection {
-        val conn = URL(urlStr).openConnection() as HttpURLConnection
+        // Mode local = ipServeur est une IP brute (pas une URL http(s) du serveur online) —
+        // c'est uniquement dans ce cas que le serveur n'est joignable que via le Wi-Fi local.
+        val estModeLocal = ipServeur?.let { !it.startsWith("http://") && !it.startsWith("https://") } == true
+        val url = URL(urlStr)
+        val conn = (if (estModeLocal) reseauWifiActif()?.openConnection(url) else null)
+            ?.let { it as HttpURLConnection }
+            ?: (url.openConnection() as HttpURLConnection)
         if (conn is HttpsURLConnection) {
             val factory = BridgeApplication.customSslSocketFactory
             Log.e("SSL_DEBUG", "ouvrirConnexion HTTPS — factory=${if (factory != null) "NON-NULL" else "NULL"} conn=${conn.javaClass.name}")
@@ -241,9 +290,12 @@ object ClientNetworkUtils {
                 http.connect()
                 val success = http.responseCode == 200
                 Log.i("ClientNetworkUtils", "📶 Réponse code = ${http.responseCode}")
+                if (success) dernierErreurConnexion = null
+                else dernierErreurConnexion = "Code HTTP ${http.responseCode}"
                 success
             } catch (e: Exception) {
                 Log.e("ClientNetworkUtils", "❌ Erreur de connexion", e)
+                dernierErreurConnexion = "${e.javaClass.simpleName} : ${e.message}"
                 false
             }
         }
@@ -399,6 +451,30 @@ object ClientNetworkUtils {
         } catch (e: Exception) {
             Log.e("ClientNetworkUtils", "❌ importerJoueursDepuisServeurEnLigne", e)
             emptyList()
+        }
+    }
+
+    // Enregistre un visiteur/touriste ajoute a la volee DIRECTEMENT sur le site en ligne,
+    // meme pendant un tournoi local - contrairement a ajouterNouveauJoueur() (via
+    // urlAvecPort/ipServeur, qui cible le serveur LOCAL du tournoi en mode local). Le
+    // token est passe en parametre d'URL (fallback $_GET cote PHP) plutot que via l'en-tete
+    // habituel : ce dernier depend d'un etat interne (tokenApi/tokenJoueur prive) pas
+    // forcement rempli a cet endroit de l'appli (ecran de preparation, avant toute
+    // connexion joueur/serveur). Dedoublonnage cote serveur (nom+prenom, meme club).
+    suspend fun ajouterVisiteurSurSite(nom: String, prenom: String, tokenJoueur: String): Joueur? {
+        return try {
+            val tokenEncode = URLEncoder.encode(tokenJoueur, "UTF-8")
+            val urlStr = "$URL_SERVEUR_ONLINE/serverBridge.php/ajouterNouveauJoueur?token_joueur=$tokenEncode"
+            val bodyJson = Gson().toJson(mapOf("nom" to nom, "prenom" to prenom))
+            val response = withContext(Dispatchers.IO) { postUrl(urlStr, bodyJson) }
+            Log.i("ClientNetworkUtils", "📩 ajouterVisiteurSurSite : $response")
+            val json = JSONObject(response)
+            if (json.getString("etat") == "OK") {
+                Joueur(idJoueur = json.getInt("idJoueur"), nom = nom, prenom = prenom)
+            } else null
+        } catch (e: Exception) {
+            Log.e("ClientNetworkUtils", "❌ Erreur ajouterVisiteurSurSite", e)
+            null
         }
     }
 
@@ -761,7 +837,25 @@ object ClientNetworkUtils {
             JSONObject(response).getInt("indexDonneAJouer")
         } catch (e: Exception) {
             Log.e("ClientNetworkUtils", "❌ Erreur POST : ${e.message}")
-            -1
+            val estModeLocal = ipServeur?.let { !it.startsWith("http://") && !it.startsWith("https://") } == true
+            // e is IOException : signal direct - le POST a echoue a cause d'un probleme de
+            // connexion (host injoignable, timeout, ...), quel que soit l'etat que
+            // ConnectivityManager rapporte au meme instant. Necessaire en plus de
+            // estSurReseauDuTournoi() : Android peut mettre plusieurs secondes a constater
+            // qu'un reseau Wi-Fi est perdu, donc le reseau peut encore sembler "actif et bon
+            // sous-reseau" au moment precis de l'echec (bug reel observe le 21/07/2026 : message
+            // generique affiche alors que le Wi-Fi venait d'etre coupe).
+            if (estModeLocal && (e is java.io.IOException || !estSurReseauDuTournoi())) {
+                // Pas de Wi-Fi actif, OU un Wi-Fi actif mais sur un autre reseau que celui du
+                // tournoi (ex. le telephone a rejoint automatiquement un autre reseau connu
+                // apres avoir perdu le Wi-Fi du tournoi) : cause quasi certaine du POST rate.
+                // Meme message/action dans les 2 cas : se reconnecter au Wi-Fi du tournoi.
+                dernierErreurConnexion = "PAS_DE_WIFI"
+                -2
+            } else {
+                dernierErreurConnexion = "${e.javaClass.simpleName} : ${e.message}"
+                -1
+            }
         }
     }
 
@@ -953,6 +1047,9 @@ object ClientNetworkUtils {
                         val j2           = eq?.joueur2
                         Log.i("ClientNetworkUtils", "➡️ Eq.$numeroEquipe | Rang=$rang | Pts=$pts | " +
                                 "${j1?.prenom ?: "?"} ${j1?.nom ?: "?"} & ${j2?.prenom ?: "?"} ${j2?.nom ?: "?"}")
+                        val position = if (estTypeMitchellFamille(typeTournoi)) {
+                            positionMitchell(numeroEquipe, nbreTables)
+                        } else null
                         list.add(
                             ClassementItem(
                                 rang = rang,
@@ -962,9 +1059,8 @@ object ClientNetworkUtils {
                                 joueur1Prenom = j1?.prenom ?: "?",
                                 joueur2Nom = j2?.nom ?: "?",
                                 joueur2Prenom = j2?.prenom ?: "?",
-                                orientationMitchell = if (typeTournoi == "Mitchell") {
-                                    if (numeroEquipe > nbreTables) "NS" else "EO"
-                                } else null,
+                                orientationMitchell = position?.first,
+                                campIndexMitchell = position?.second,
                                 scorePct = o.optDouble("scorePct", 0.0)
                             )
                         )

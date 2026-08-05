@@ -23,6 +23,11 @@ import app.resultatsbridge.common.model.DonneAvantTournoi
 import app.resultatsbridge.common.model.EquipeDonneInfo
 
 import app.resultatsbridge.common.model.ErreurLogItem
+import app.resultatsbridge.organisateur.bws.BwsTestGenerator
+import app.resultatsbridge.organisateur.bws.BridgemateConverter
+import app.resultatsbridge.organisateur.bws.BwsPaths
+import app.resultatsbridge.organisateur.bws.BwsWriter
+import app.resultatsbridge.organisateur.bws.BwsHandImporter
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
@@ -208,7 +213,8 @@ object DatabaseManager {
     fun miseAJourTournoiMitchell(
         context: Context,
         idTournoi: Int,
-        nbreEquipes: Int
+        nbreEquipes: Int,
+        bwsExterneUri: android.net.Uri? = null
     ) {
         val nbreTables          = nbreEquipes / 2
         val nbreMouvements      = if (nbreTables % 2 == 0) nbreTables - 1 else nbreTables
@@ -237,6 +243,37 @@ object DatabaseManager {
             Log.e("DatabaseManager", "❌ Erreur miseAJourTournoiMitchell", e)
         } finally {
             DatabaseHelper.closeDatabase()
+        }
+
+        // 🔨 FFBClubNet/.bws : si l'organisateur a fourni un vrai fichier reçu de
+        // FFBClubNet (bwsExterneUri), on l'utilise tel quel — sinon on génère un
+        // gabarit de test (BwsTestGenerator, pas la vraie cible finale). Ne doit
+        // jamais faire échouer la création du tournoi si ça plante.
+        try {
+            if (bwsExterneUri != null) {
+                val importe = BwsPaths.importerBwsExterne(context, idTournoi, bwsExterneUri)
+                if (importe == null) {
+                    Log.e("DatabaseManager", "❌ Import .bws externe échoué, repli sur le générateur de test")
+                    BwsTestGenerator.genererPourTournoiMitchell(
+                        context, idTournoi, nbreTables, nbreMouvements, nbreDonnesParTable
+                    )
+                } else {
+                    // Mains (HandRecord) du vrai fichier -> tables locales "mains"/
+                    // "donnes", pour que l'écran de saisie résultat les reconnaisse
+                    // comme déjà saisies (voir BwsHandImporter).
+                    try {
+                        BwsHandImporter.importerMainsDepuisBws(context, idTournoi, importe)
+                    } catch (e: Exception) {
+                        Log.e("DatabaseManager", "❌ Erreur import mains .bws (non bloquant)", e)
+                    }
+                }
+            } else {
+                BwsTestGenerator.genererPourTournoiMitchell(
+                    context, idTournoi, nbreTables, nbreMouvements, nbreDonnesParTable
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("DatabaseManager", "❌ Erreur génération/import .bws (non bloquant)", e)
         }
     }
 
@@ -327,11 +364,28 @@ object DatabaseManager {
     //   EO = 1..N  (rotation +1 table/ronde, sans skip)
     //   NS = N+1..2N  (fixes, NS à table T = équipe T+N)
     // ─────────────────────────────────────────────────────────────────────
-    private fun offsetGueridon(tableNumero: Int, n: Int): Int = when {
-        tableNumero == 1 -> 0
-        tableNumero == n -> 0
-        tableNumero > n / 2 -> n - tableNumero
-        else -> n - tableNumero + 1
+    // Corrige le 05/08/2026, apres verification contre une source primaire (le guéridon
+    // n'est PAS une simple astuce de calcul, c'est une vraie regle FFB — voir
+    // https://scjc-bridge.fr/le-mouvement-mitchell et le document d'Olivier Labbe,
+    // "Mouvements de tournois de Bridge" : "Si le nombre de tables n est pair,
+    // l'Arbitre peut placer un guéridon relais entre les tables n/2 et (n/2)+1 (...)
+    // [la derniere table] partage a chaque position les etuis qui arrivent a la table 1."
+    //
+    // Consequence concrete : le Guéridon EXIGE un nombre de tables PAIR (verifie avec
+    // Marco : le premier test, 3 tables, n'etait pas une configuration valide pour ce
+    // mouvement). Le guéridon n'est pas entre la derniere table et la table 1 (ancienne
+    // hypothese, fausse) mais planté AU MILIEU de la chaine de circulation des donnes.
+    //
+    // Modele retenu (chaine de N emplacements pour N jeux de donnes, qui "descendent"
+    // d'un cran a chaque mouvement) : table 1, table 2, ..., table N/2, [guéridon],
+    // table (N/2)+1, ..., table N-1. La derniere table (N) n'a pas d'emplacement propre
+    // dans la chaine : elle rejoue a CHAQUE mouvement exactement le meme jeu que la
+    // table 1 (simultane, meme mouvement), donc on lui donne la position de la table 1.
+    // Verifie a la main, mouvement complet 4 tables/8 equipes : les 4 tables ET les 4
+    // equipes EO (qui tournent) voient chacune les 4 jeux, sans doublon ni jeu manque.
+    private fun positionChaineGueridon(tableNumero: Int, nbreTables: Int): Int {
+        val tablePourChaine = if (tableNumero == nbreTables) 1 else tableNumero
+        return if (tablePourChaine <= nbreTables / 2) tablePourChaine else tablePourChaine + 1
     }
 
     private fun getMouvementMitchellGueridon(
@@ -350,9 +404,20 @@ object DatabaseManager {
 
         if (nbreEquipes < 2) return MouvementResult.Erreur("Nombre d'équipes MitchellGuéridon invalide : $nbreEquipes")
 
-        // Rotation EO sans skip : tableNumero = (equipe + mvnt - 1) mod N
-        var tableNumero = equipeNumero + mvntNumero - 1
-        if (tableNumero > nbreTables) tableNumero -= nbreTables
+        // Équipe NS (equipeNumero > nbreTables) : fixe à sa table, ne dépend jamais
+        // du mouvement — contrairement à EO qui tourne (rotation sans skip :
+        // tableNumero = (equipe + mvnt - 1) mod N). Même correctif que celui du
+        // 25/07/2026 dans getMouvementMitchell, jamais porté ici jusqu'au 05/08/2026
+        // (repere sur un test MitchellGuéridon 6 équipes/3 tables : eq1 et eq5
+        // censees etre a la meme table au mvnt 2 se calculaient chacune une table
+        // differente, et eq6 debordait sur une "table 4" inexistante).
+        var tableNumero = if (equipeNumero > nbreTables) {
+            equipeNumero - nbreTables
+        } else {
+            var t = equipeNumero + mvntNumero - 1
+            if (t > nbreTables) t -= nbreTables
+            t
+        }
         Log.i("DatabaseManager", "   → équipe=$equipeNumero mvnt=$mvntNumero table=$tableNumero")
 
         val equipeNS = tableNumero + nbreTables
@@ -360,12 +425,13 @@ object DatabaseManager {
         if (equipeEO <= 0) equipeEO += nbreTables
         Log.i("DatabaseManager", "   → equipeNS=$equipeNS | equipeEO=$equipeEO")
 
-        // Set de donnes selon la formule du guéridon
-        val offset     = offsetGueridon(tableNumero, nbreTables)
-        val setDonnes  = ((offset - mvntNumero + 1).mod(nbreTables)) + 1
+        // Set de donnes selon la position dans la chaine de circulation (voir
+        // positionChaineGueridon ci-dessus) : chaque mouvement, le jeu "descend" d'un cran.
+        val positionChaine = positionChaineGueridon(tableNumero, nbreTables)
+        val setDonnes      = ((positionChaine + mvntNumero - 2) % nbreTables) + 1
         val premiereDonne = (setDonnes - 1) * nbreDonnesParTable + 1
         val derniereDonne = setDonnes * nbreDonnesParTable
-        Log.i("DatabaseManager", "   → offset=$offset setDonnes=$setDonnes | donnes=$premiereDonne..$derniereDonne")
+        Log.i("DatabaseManager", "   → positionChaine=$positionChaine setDonnes=$setDonnes | donnes=$premiereDonne..$derniereDonne")
 
         data class InfosJoueurs(val j1Nom: String, val j1Prenom: String, val j2Nom: String, val j2Prenom: String, val defaillante: Boolean)
         fun getInfosJoueurs(numEquipe: Int): InfosJoueurs {
@@ -498,8 +564,20 @@ object DatabaseManager {
         Log.i("DatabaseManager", "   → nbreTables=$nbreTables offset=$offset")
 
         // 3️⃣ Table de l'équipe au mouvement M
-        var tableNumero = equipeNumero + mvntNumero - 1 + offset
-        if (tableNumero > nbreTables) tableNumero -= nbreTables
+        // Équipe NS (equipeNumero > nbreTables) : fixe à sa table, ne dépend
+        // jamais du mouvement — contrairement à EO qui tourne. Avant ce
+        // correctif, la formule de rotation EO était appliquée aussi aux NS,
+        // donnant une table fausse (silencieusement, si encore dans la plage
+        // 1..nbreTables) ou carrément invalide pour l'équipe NS la plus haute
+        // numérotée à partir du mouvement 2 (repéré le 25/07/2026, tournoi
+        // 7 tables/14 équipes — équipe 14 envoyée à la "table 8" inexistante).
+        var tableNumero = if (equipeNumero > nbreTables) {
+            equipeNumero - nbreTables
+        } else {
+            var t = equipeNumero + mvntNumero - 1 + offset
+            if (t > nbreTables) t -= nbreTables
+            t
+        }
         Log.i("DatabaseManager", "   → équipe=$equipeNumero mvnt=$mvntNumero table=$tableNumero")
 
         // 4️⃣ Équipe NS à cette table (NS fixe : eq = table + nbreTables)
@@ -671,17 +749,34 @@ object DatabaseManager {
 
     fun ajouterNouveauJoueur(context: Context, nom: String, prenom: String): Joueur? {
         val db = DatabaseHelper.getDatabase(context)
-        val values = ContentValues().apply { put("nom", nom); put("prenom", prenom) }
+        // ID negatif dedie aux joueurs ajoutes localement (ex. touristes) : les ID du site
+        // sont toujours positifs (auto-increment MySQL), donc un ID negatif ne peut jamais
+        // entrer en collision avec un futur vrai membre - et importerJoueursLocaux() ne
+        // touche plus qu'aux ID positifs, ces joueurs ne sont donc plus jamais perdus/ecrases
+        // par un import ulterieur.
+        val idLocal = db.rawQuery("SELECT MIN(ID) FROM joueurs", null).use { cursor ->
+            if (cursor.moveToFirst() && !cursor.isNull(0)) minOf(cursor.getLong(0), 0L) - 1 else -1L
+        }
+        val values = ContentValues().apply {
+            put("ID", idLocal)
+            put("nom", nom)
+            put("prenom", prenom)
+        }
         val newId = db.insert("joueurs", null, values)
-        return if (newId != -1L) Joueur(idJoueur = newId.toInt(), nom = nom, prenom = prenom) else null
+        return if (newId != -1L) Joueur(idJoueur = idLocal.toInt(), nom = nom, prenom = prenom) else null
     }
 
     fun importerJoueursLocaux(context: Context, joueurs: List<Joueur>): Int {
         val db = DatabaseHelper.getDatabase(context)
         return try {
             db.beginTransaction()
-            db.delete("joueurs", null, null)
-            val stmt = db.compileStatement("INSERT INTO joueurs (ID, nom, prenom) VALUES (?, ?, ?)")
+            // Fusion, pas remplacement total : l'ancienne version videait TOUTE la table
+            // avant de la remplir depuis le site, ce qui effacait au passage les joueurs
+            // ajoutes localement a la volee (touristes). Desormais on met seulement a
+            // jour/ajoute les joueurs du site (ID positifs) - les joueurs locaux (ID
+            // negatifs, voir ajouterNouveauJoueur) ne sont jamais references ici, donc
+            // jamais touches ni perdus.
+            val stmt = db.compileStatement("INSERT OR REPLACE INTO joueurs (ID, nom, prenom) VALUES (?, ?, ?)")
             for (j in joueurs) {
                 stmt.bindLong(1, j.idJoueur.toLong())
                 stmt.bindString(2, j.nom)
@@ -689,7 +784,7 @@ object DatabaseManager {
                 stmt.executeInsert()
             }
             db.setTransactionSuccessful()
-            Log.i("DatabaseManager", "✅ ${joueurs.size} joueurs importés en local")
+            Log.i("DatabaseManager", "✅ ${joueurs.size} joueurs importés en local (fusion, joueurs locaux conservés)")
             joueurs.size
         } catch (e: Exception) {
             Log.e("DatabaseManager", "❌ importerJoueursLocaux : ${e.message}")
@@ -1650,28 +1745,46 @@ object DatabaseManager {
         var shouldFinalizeClassement = false
         return try {
             db.beginTransaction()
-            val values = ContentValues().apply {
-                put("id_tournoi", idTournoi); put("mvnt_numero", mvntNumero); put("equipeNS", equipeNS); put("equipeEO", equipeEO)
-                put("numero_table", numeroTable); put("numero_donne", numeroDonne); put("contrat", contrat); put("declarant", declarant)
-                put("resultat_contrat", resultatContrat); put("points", points); put("nombre_pli", nombrePlis); put("carteEntame", carteEntame)
-                if (pointsNS != null) put("pointsNS", pointsNS) else putNull("pointsNS")
-                if (pointsEO != null) put("pointsEO", pointsEO) else putNull("pointsEO")
-            }
-            db.insertOrThrow("resultats", null, values)
-            Log.i("DatabaseManager", "✅ Résultat inséré donne=$numeroDonne equipeNS=$equipeNS")
 
-            if (historiqueJson.isNotEmpty() && historiqueJson != "[]") {
-                try {
-                    val histType = object : TypeToken<List<Map<String, String>>>() {}.type
-                    val histList: List<Map<String, String>> = gson.fromJson(historiqueJson, histType)
-                    Log.i("DatabaseManager", "💬 ${histList.size} enchères à enregistrer")
-                    for ((i, obj) in histList.withIndex()) {
-                        val joueur  = URLDecoder.decode(obj["joueur"]  ?: "", StandardCharsets.UTF_8.name())
-                        val annonce = URLDecoder.decode(obj["annonce"] ?: "", StandardCharsets.UTF_8.name())
-                        db.execSQL("INSERT INTO encheres (id_tournoi, numero_donne, equipeNS, equipeEO, ordre, joueur, annonce) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                            arrayOf(idTournoi, numeroDonne, equipeNS, equipeEO, i, joueur, annonce))
-                    }
-                } catch (e: Exception) { Log.e("DatabaseManager", "⚠️ Erreur insertion enchères : ${e.message}") }
+            // Protection anti-double-saisie : NS et EO d'une même table peuvent
+            // chacun déclencher enregistreDonne pour LE MÊME plateau (mauvaise
+            // manip, double-tap, ou test manuel en solo sur un seul téléphone où
+            // on rejoue l'équipe adverse). Sans ce garde-fou, une 2e soumission
+            // insère une ligne "resultats" en double ET décrémente
+            // nbre_enregistrement une 2e fois, ce qui le fait sauter par-dessus 0
+            // et bloque le tournoi indéfiniment sur l'écran d'attente classement
+            // (repéré le 25/07/2026, tournoi test Mitchell 3 tables/6 équipes).
+            val resultatDejaEnregistre = db.rawQuery(
+                "SELECT ID FROM resultats WHERE id_tournoi=? AND mvnt_numero=? AND numero_table=? AND numero_donne=? LIMIT 1",
+                arrayOf(idTournoi.toString(), mvntNumero.toString(), numeroTable.toString(), numeroDonne.toString())
+            ).use { c -> c.moveToFirst() }
+
+            if (!resultatDejaEnregistre) {
+                val values = ContentValues().apply {
+                    put("id_tournoi", idTournoi); put("mvnt_numero", mvntNumero); put("equipeNS", equipeNS); put("equipeEO", equipeEO)
+                    put("numero_table", numeroTable); put("numero_donne", numeroDonne); put("contrat", contrat); put("declarant", declarant)
+                    put("resultat_contrat", resultatContrat); put("points", points); put("nombre_pli", nombrePlis); put("carteEntame", carteEntame)
+                    if (pointsNS != null) put("pointsNS", pointsNS) else putNull("pointsNS")
+                    if (pointsEO != null) put("pointsEO", pointsEO) else putNull("pointsEO")
+                }
+                db.insertOrThrow("resultats", null, values)
+                Log.i("DatabaseManager", "✅ Résultat inséré donne=$numeroDonne equipeNS=$equipeNS")
+
+                if (historiqueJson.isNotEmpty() && historiqueJson != "[]") {
+                    try {
+                        val histType = object : TypeToken<List<Map<String, String>>>() {}.type
+                        val histList: List<Map<String, String>> = gson.fromJson(historiqueJson, histType)
+                        Log.i("DatabaseManager", "💬 ${histList.size} enchères à enregistrer")
+                        for ((i, obj) in histList.withIndex()) {
+                            val joueur  = URLDecoder.decode(obj["joueur"]  ?: "", StandardCharsets.UTF_8.name())
+                            val annonce = URLDecoder.decode(obj["annonce"] ?: "", StandardCharsets.UTF_8.name())
+                            db.execSQL("INSERT INTO encheres (id_tournoi, numero_donne, equipeNS, equipeEO, ordre, joueur, annonce) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                arrayOf(idTournoi, numeroDonne, equipeNS, equipeEO, i, joueur, annonce))
+                        }
+                    } catch (e: Exception) { Log.e("DatabaseManager", "⚠️ Erreur insertion enchères : ${e.message}") }
+                }
+            } else {
+                Log.i("DatabaseManager", "ℹ️ Résultat déjà enregistré pour table=$numeroTable mvnt=$mvntNumero donne=$numeroDonne — soumission ignorée (double saisie)")
             }
 
             val donneDejaExiste = db.rawQuery("SELECT ID FROM donnes WHERE id_tournoi=? AND numero_donne=? LIMIT 1", arrayOf(idTournoi.toString(), numeroDonne.toString())).use { c -> c.moveToFirst() }
@@ -1699,7 +1812,9 @@ object DatabaseManager {
             db.execSQL(sqlUpdate, arrayOf(mvntNumero, indexDonneJouee, numeroDonne, idTournoi, equipeNS))
             db.execSQL(sqlUpdate, arrayOf(mvntNumero, indexDonneJouee, numeroDonne, idTournoi, equipeEO))
 
-            db.execSQL("UPDATE tournois SET nbre_enregistrement = nbre_enregistrement - 1 WHERE ID = ?", arrayOf(idTournoi))
+            if (!resultatDejaEnregistre) {
+                db.execSQL("UPDATE tournois SET nbre_enregistrement = nbre_enregistrement - 1 WHERE ID = ?", arrayOf(idTournoi))
+            }
             var nbreRestants = -1
             db.rawQuery("SELECT nbre_enregistrement FROM tournois WHERE ID = ?", arrayOf(idTournoi.toString())).use { c -> if (c.moveToFirst()) nbreRestants = c.getInt(0) }
             Log.i("DatabaseManager", "💾 nbre_enregistrement restants = $nbreRestants")
@@ -1708,6 +1823,49 @@ object DatabaseManager {
             db.setTransactionSuccessful()
             val indexDonneAJouer = indexDonneJouee + 1
             Log.i("DatabaseManager", "✅ enregistreDonne OK → indexDonneAJouer=$indexDonneAJouer")
+
+            // 🔨 Prototype FFBClubNet/.bws (Étape B) : écrit le score converti
+            // dans le .bws du tournoi (généré par BwsTestGenerator, Étape A) —
+            // ici pour que ça marche quel que soit le chemin d'appel (HTTP
+            // ClientServeurHTTP OU appel local direct ClientActivity/useLocal).
+            // Non bloquant, ne doit jamais casser l'enregistrement du résultat.
+            // Ignoré sur double saisie (resultatDejaEnregistre) pour ne pas
+            // écraser la vraie valeur déjà écrite par une éventuelle 2e soumission erronée.
+            if (!resultatDejaEnregistre) {
+                try {
+                    val fichierBws = BwsPaths.fichier(context, idTournoi)
+                    if (fichierBws.exists()) {
+                        val resultat = BridgemateConverter.convertir(
+                            contrat = contrat,
+                            declarant = declarant,
+                            signe = resultatContrat,
+                            plis = nombrePlis,
+                            carteEntame = carteEntame,
+                            enErreurArbitre = false,
+                            equipeNS = equipeNS,
+                            equipeEO = equipeEO
+                        )
+                        BwsWriter.ecrireScore(
+                            fichierBws,
+                            section = 1,
+                            table = numeroTable,
+                            round = mvntNumero,
+                            board = numeroDonne,
+                            // FFBClubNet numérote PairNS = numéro de table (NS fixe),
+                            // alors que V3 numérote equipeNS = table + nbreTables en
+                            // interne (pour distinguer équipe NS/EO dans toute l'appli,
+                            // voir getMouvementMitchell). Il faut donc transposer ici,
+                            // uniquement au moment de l'écriture vers le .bws.
+                            pairNS = numeroTable,
+                            pairEW = equipeEO,
+                            resultat = resultat
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e("DatabaseManager", "❌ Erreur écriture .bws (non bloquant)", e)
+                }
+            }
+
             indexDonneAJouer
         } catch (e: Exception) { Log.e("DatabaseManager", "❌ enregistreDonne erreur : ${e.message}", e); -1 }
         finally {

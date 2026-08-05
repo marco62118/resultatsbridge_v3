@@ -370,20 +370,27 @@ fun MouvementScreen(
                         val aSaute = TournoiConfig.NBRE_TABLES > 0 &&
                                 TournoiConfig.NBRE_TABLES % 2 == 0 &&
                                 mouvement.mvntNumero > TournoiConfig.NBRE_TABLES / 2
+                        Text(text = "Table ", style = MaterialTheme.typography.bodyLarge)
                         Text(
-                            text       = "Table ${mouvement.tableNumero}",
-                            style      = MaterialTheme.typography.titleMedium,
+                            text       = "${mouvement.tableNumero}",
+                            style      = MaterialTheme.typography.headlineLarge,
                             color      = if (aSaute) Color.Red else MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.Bold
                         )
-                        Text(text = "   Éq. ", style = MaterialTheme.typography.bodyMedium)
-                        Text(text = "${mouvement.equipeNS} NS", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                        Text(text = " -  Éq. ", style = MaterialTheme.typography.bodyMedium)
-                        Text(text = "${mouvement.equipeEO} EO", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        Text(text = "   Éq. ", style = MaterialTheme.typography.bodyLarge)
+                        Text(text = "${mouvement.equipeNS}", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        Text(text = " NS", style = MaterialTheme.typography.bodyLarge)
+                        Text(text = " -  Éq. ", style = MaterialTheme.typography.bodyLarge)
+                        Text(text = "${mouvement.equipeEO}", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                        Text(text = " EO", style = MaterialTheme.typography.bodyLarge)
                     }
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                        Text(text = "Mouvement ${mouvement.mvntNumero}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        Text(text = "   Donnes : ${mouvement.donnes.joinToString { "N° ${it.numero}" }}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(text = "Mouvement ${mouvement.mvntNumero}", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Text(text = "   Donnes : N° ", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        mouvement.donnes.forEachIndexed { index, donne ->
+                            if (index > 0) Text(text = ", ", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(text = "${donne.numero}", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                     HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
@@ -425,11 +432,12 @@ fun MouvementScreen(
 
                     if (donneEnCours != null) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                            Text(text = "Donne N° ${donneEnCours.numero}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFFFC0202),)
-                            Text(text = "   Donneur : ", style = MaterialTheme.typography.bodySmall)
-                            Text(text = donneEnCours.donneur, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text(text = "   Vulnérable : ", style = MaterialTheme.typography.bodySmall)
-                            Text(text = donneEnCours.vulnerable, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text(text = "Donne N° ", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFFFC0202))
+                            Text(text = "${donneEnCours.numero}", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold, color = Color(0xFFFC0202))
+                            Text(text = "   Donneur : ", style = MaterialTheme.typography.bodyLarge)
+                            Text(text = donneEnCours.donneur, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            Text(text = "   Vulnérable : ", style = MaterialTheme.typography.bodyLarge)
+                            Text(text = donneEnCours.vulnerable, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                         }
                     } else {
                         Text(text = "⚠️ Donne introuvable (index=${mouvement.indexDonneAJouer}/${mouvement.donnes.size})", style = MaterialTheme.typography.bodySmall, color = Color.Red, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)

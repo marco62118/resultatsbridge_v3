@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.resultatsbridge.common.model.ClassementItem
+import app.resultatsbridge.common.utils.libelleCampMitchell
 import kotlin.math.floor
 
 /**
@@ -195,7 +196,8 @@ private fun CarteEquipe(
         ) {
             Column {
                 // Afficher NS/EO si Mitchell
-                val suffixeOrientation = item.orientationMitchell?.let { " ($it)" } ?: ""
+                val libelleCamp = libelleCampMitchell(item.orientationMitchell, item.campIndexMitchell)
+                val suffixeOrientation = libelleCamp?.let { " ($it)" } ?: ""
                 Text(
                     text       = "Équipe ${item.numeroEquipe}$suffixeOrientation  (Rang $rang)",
                     style      = MaterialTheme.typography.titleMedium,

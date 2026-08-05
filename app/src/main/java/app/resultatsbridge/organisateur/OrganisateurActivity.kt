@@ -537,8 +537,17 @@ class OrganisateurActivity : BaseActivity() {
                                                     securePrefs = securePrefs,
                                                     onEnCours = { exportEnCours = it },
                                                     onMessage = { msg ->
-                                                        exportMessage = msg; showResultatExport =
-                                                        true
+                                                        exportMessage = msg
+                                                        // Identifiants mémorisés invalides (souvent le
+                                                        // compte perso au lieu du compte association) :
+                                                        // rouvrir le formulaire éditable au lieu de rester
+                                                        // bloqué sur un message d'erreur sans issue
+                                                        // (repéré le 25/07/2026).
+                                                        if (msg == "❌ Identifiants incorrects") {
+                                                            showDialogExport = true
+                                                        } else {
+                                                            showResultatExport = true
+                                                        }
                                                     },
                                                     onSuccess = {
                                                         // Fermer le tournoi APRÈS export réussi

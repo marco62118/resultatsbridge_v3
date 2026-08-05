@@ -35,6 +35,10 @@ fun AppScaffold(
     numeroTournoi: Int?,
     equipeChoisie: Equipe?,  // ✅ gardé en param��tre pour compatibilité mais non affiché
     nomEcran: String = "",   // DEBUG — à supprimer avant mise en service
+    // Organisateur en local qui joue lui-même : ses propres saisies passent en direct par
+    // la base locale (jamais par le réseau), donc lui perdre son Wi-Fi ne l'empêche jamais
+    // de continuer à jouer — mais ça coupe TOUS les autres joueurs sans qu'il le sache.
+    alerteWifiCoupe: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val dateDuJour = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault()).format(Date())
@@ -62,6 +66,19 @@ fun AppScaffold(
                 textAlign = TextAlign.Center,
                 modifier  = Modifier.fillMaxWidth()
             )
+
+            if (alerteWifiCoupe) {
+                Text(
+                    text      = "⚠️ WI-FI COUPÉ — les joueurs ne peuvent plus se connecter !",
+                    color     = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier  = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFFB71C1C))
+                        .padding(vertical = 4.dp)
+                )
+            }
 
             // Tournoi + date sur une ligne
             val tournoiText = if (numeroTournoi != null)

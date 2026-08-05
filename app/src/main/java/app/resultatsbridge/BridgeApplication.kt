@@ -20,10 +20,13 @@ class BridgeApplication : Application() {
 
     companion object {
         var customSslSocketFactory: SSLSocketFactory? = null
+        lateinit var instance: BridgeApplication
+            private set
     }
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         Log.e("BridgeApp", "### onCreate SDK=${Build.VERSION.SDK_INT} v3 ###")
 
         // ISRG Root X1 (Let's Encrypt) n'est dans le trust store Android qu'à partir

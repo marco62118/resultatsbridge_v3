@@ -6,8 +6,13 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
+import android.provider.OpenableColumns
+import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +29,7 @@ import app.resultatsbridge.common.theme.champColors
 import androidx.compose.ui.unit.dp
 import app.resultatsbridge.client.ClientNetworkUtils
 import app.resultatsbridge.common.utils.getSecurePrefs
+import app.resultatsbridge.common.utils.positionMitchell
 import app.resultatsbridge.organisateur.data.DatabaseManager
 import app.resultatsbridge.common.model.Equipe
 import app.resultatsbridge.common.model.TournoiConfig
@@ -89,6 +95,60 @@ fun ConstitutionEquipesScreen(
     var messageParite   by remember { mutableStateOf<String?>(null) }
     var importEnCours   by remember { mutableStateOf(false) }
     var msgImport       by remember { mutableStateOf<String?>(null) }
+
+    // Enregistrement d'un visiteur/touriste sur le site (voir bouton "Ajouter à l'équipe"
+    // plus bas) : si pas d'Internet au moment de l'ajout, on garde le nom/prénom en
+    // attente pour pouvoir réessayer depuis la boîte de dialogue une fois le réseau rétabli.
+    var showDialogPasInternetVisiteur by remember { mutableStateOf(false) }
+    var visiteurNomEnAttente by remember { mutableStateOf("") }
+    var visiteurPrenomEnAttente by remember { mutableStateOf("") }
+
+    // Import d'un vrai fichier .bws fourni par FFBClubNet (Mitchell uniquement,
+    // mode local) : remplace le gabarit de test généré automatiquement par
+    // BwsTestGenerator, pour qu'un tournoi joué sur V3 produise un fichier
+    // réellement renvoyable à FFBClubNet. Voir BwsPaths.importerBwsExterne.
+    var bwsImporteUri by remember { mutableStateOf<Uri?>(null) }
+    var bwsImporteNom by remember { mutableStateOf<String?>(null) }
+    val bwsPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        bwsImporteUri = uri
+        bwsImporteNom = uri?.let { u ->
+            var nom: String? = null
+            context.contentResolver.query(u, null, null, null, null)?.use { cursor ->
+                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && cursor.moveToFirst()) nom = cursor.getString(idx)
+            }
+            nom ?: u.lastPathSegment
+        }
+        Log.i("ConstitutionEquipes", "📥 Fichier .bws sélectionné : $bwsImporteNom")
+    }
+
+    // Tente d'enregistrer durablement un visiteur sur le site (en plus de l'ajout local,
+    // qui a toujours lieu immédiatement et fait fonctionner le tournoi même sans réseau).
+    // Si pas d'accès Internet à cet instant, ouvre une boîte de dialogue au lieu d'échouer
+    // silencieusement — appelée à la fois juste après l'ajout et depuis le bouton "Réessayer".
+    val tenterEnregistrementVisiteur: suspend (String, String) -> Unit = { nom, prenom ->
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+        if (caps?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) != true) {
+            visiteurNomEnAttente = nom
+            visiteurPrenomEnAttente = prenom
+            showDialogPasInternetVisiteur = true
+        } else {
+            val token = getSecurePrefs(context).getString("tokenJoueur", "") ?: ""
+            val visiteur = withContext(Dispatchers.IO) {
+                ClientNetworkUtils.ajouterVisiteurSurSite(nom = nom, prenom = prenom, tokenJoueur = token)
+            }
+            if (visiteur != null) {
+                showDialogPasInternetVisiteur = false
+                Toast.makeText(context, "✅ $prenom $nom aussi enregistré sur le site", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "⚠️ Échec de l'enregistrement de $prenom $nom sur le site (gardé en local pour ce tournoi)", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     var equipeASupprimer by remember { mutableStateOf<Equipe?>(null) }
 
     // Supprime une équipe déjà constituée : ses 2 joueurs retournent dans le pool,
@@ -162,6 +222,38 @@ fun ConstitutionEquipesScreen(
             },
             dismissButton = {
                 TextButton(onClick = { equipeASupprimer = null }) { Text("Annuler") }
+            }
+        )
+    }
+
+    if (showDialogPasInternetVisiteur) {
+        AlertDialog(
+            onDismissRequest = { showDialogPasInternetVisiteur = false },
+            title   = { Text("Pas de connexion Internet") },
+            text    = {
+                Column {
+                    Text(
+                        "Impossible d'enregistrer $visiteurPrenomEnAttente $visiteurNomEnAttente " +
+                                "sur le site pour l'instant : pas d'accès Internet. Le joueur reste " +
+                                "disponible pour ce tournoi, seul l'enregistrement durable sur le site " +
+                                "a échoué."
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = { context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("Ouvrir les paramètres Wi-Fi") }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch {
+                        tenterEnregistrementVisiteur(visiteurNomEnAttente, visiteurPrenomEnAttente)
+                    }
+                }) { Text("Réessayer") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDialogPasInternetVisiteur = false }) { Text("Annuler") }
             }
         )
     }
@@ -369,18 +461,20 @@ fun ConstitutionEquipesScreen(
                                     return@Button
                                 }
                                 scope.launch {
+                                    val nomSaisi    = nouveauNom.trim()
+                                    val prenomSaisi = nouveauPrenom.trim()
                                     val joueurCree = if (modeOnline) {
                                         withContext(Dispatchers.IO) {
                                             ClientNetworkUtils.ajouterNouveauJoueur(
-                                                nom    = nouveauNom.trim(),
-                                                prenom = nouveauPrenom.trim()
+                                                nom    = nomSaisi,
+                                                prenom = prenomSaisi
                                             )
                                         }
                                     } else {
                                         DatabaseManager.ajouterNouveauJoueur(
                                             context = context,
-                                            nom     = nouveauNom.trim(),
-                                            prenom  = nouveauPrenom.trim()
+                                            nom     = nomSaisi,
+                                            prenom  = prenomSaisi
                                         )
                                     }
                                     if (joueurCree != null) {
@@ -388,6 +482,12 @@ fun ConstitutionEquipesScreen(
                                         if (joueur1 == null) joueur1 = joueurCree else joueur2 = joueurCree
                                         nouveauNom    = ""
                                         nouveauPrenom = ""
+                                        // Enregistrement durable sur le site (visiteur ajouté à la
+                                        // volée) : uniquement en mode local, le mode online l'a déjà
+                                        // fait ci-dessus via ajouterNouveauJoueur.
+                                        if (!modeOnline) {
+                                            tenterEnregistrementVisiteur(nomSaisi, prenomSaisi)
+                                        }
                                     }
                                 }
                             }
@@ -506,11 +606,7 @@ fun ConstitutionEquipesScreen(
                 val positions: Map<Int, Pair<String, Int>> = if (estMitchell) {
                     val nbreTables = equipes.size / 2
                     equipes.associate { equipe ->
-                        if (equipe.equipeNumero <= nbreTables) {
-                            equipe.equipeNumero to Pair("EO", equipe.equipeNumero)
-                        } else {
-                            equipe.equipeNumero to Pair("NS", equipe.equipeNumero - nbreTables)
-                        }
+                        equipe.equipeNumero to positionMitchell(equipe.equipeNumero, nbreTables)
                     }
                 } else {
                     // Howell : positions lues en BD (serveur ou local) à partir de l'idTournoi.
@@ -536,6 +632,26 @@ fun ConstitutionEquipesScreen(
                         onMonter            = if (index > 0) { { intervertirEquipes(equipe, equipes[index - 1]) } } else null,
                         onDescendre         = if (index < equipes.size - 1) { { intervertirEquipes(equipe, equipes[index + 1]) } } else null
                     )
+                }
+
+                if (estMitchell && !estGueridon && !modeOnline) {
+                    item {
+                        Spacer(Modifier.height(16.dp))
+                        OutlinedButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick  = { bwsPickerLauncher.launch("*/*") }
+                        ) {
+                            Text(
+                                bwsImporteNom?.let { "📄 Fichier FFBClubNet : $it" }
+                                    ?: "Importer un fichier .bws FFBClubNet (optionnel)"
+                            )
+                        }
+                        if (bwsImporteNom != null) {
+                            TextButton(onClick = { bwsImporteUri = null; bwsImporteNom = null }) {
+                                Text("Annuler l'import, générer un fichier de test")
+                            }
+                        }
+                    }
                 }
 
                 item {
@@ -583,9 +699,10 @@ fun ConstitutionEquipesScreen(
                                                 )
                                             } else {
                                                 DatabaseManager.miseAJourTournoiMitchell(
-                                                    context     = context,
-                                                    idTournoi   = idTournoi,
-                                                    nbreEquipes = equipes.size
+                                                    context       = context,
+                                                    idTournoi     = idTournoi,
+                                                    nbreEquipes   = equipes.size,
+                                                    bwsExterneUri = bwsImporteUri
                                                 )
                                             }
                                         }

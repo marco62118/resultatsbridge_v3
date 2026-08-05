@@ -1,6 +1,7 @@
 ﻿// ACTIVITÉ : Accueil — choix du mode Organisateur / Joueur
 package app.resultatsbridge.main
 
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
@@ -68,8 +69,22 @@ class MainActivity : BaseActivity() {
 @Composable
 private fun ContenuPrincipal() {
     val context = LocalContext.current
+    // Position du sélecteur mémorisée (BridgePrefs, même fichier que
+    // recentServerIps dans ConnexionScreen.kt — donnée non sensible, pas
+    // besoin d'EncryptedSharedPreferences). Défaut = non fédéré, pour ne pas
+    // changer le comportement existant tant que le choix n'a pas été fait.
+    val prefs = remember { context.getSharedPreferences("BridgePrefs", Context.MODE_PRIVATE) }
+    var clubFedere by remember { mutableStateOf(prefs.getBoolean("club_federe", false)) }
     var modeOnline by remember { mutableStateOf(false) }  // ✅ Local par défaut
-    var modeJeu by remember { mutableStateOf("encheres_mains") }
+    var modeJeu by remember { mutableStateOf("rapide") }
+
+    fun changerClubFedere(valeur: Boolean) {
+        clubFedere = valeur
+        prefs.edit().putBoolean("club_federe", valeur).apply()
+        // Un club fédéré (FFBClubNet) passe par le serveur V4 sur le PC du
+        // club, jamais par le cloud resultats-bridge — pas de choix à faire.
+        if (valeur) modeOnline = false
+    }
 
             AppScaffold(
                 ipAddress = "",
@@ -83,6 +98,37 @@ private fun ContenuPrincipal() {
                             .padding(16.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+
+                        // ── Sélecteur club fédéré / non fédéré ──────────
+                        // En club fédéré, FFBClubNet gère le tournoi et le
+                        // serveur V4 tourne sur le PC du club : plus de choix
+                        // Online (toujours Local), plus de bouton
+                        // Organisateur (rien à créer côté V3).
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "Club fédéré",
+                                fontWeight = if (clubFedere) FontWeight.Bold else FontWeight.Normal,
+                                color = if (clubFedere) TexteSelectionne else TexteNonSelectionne
+                            )
+                            Switch(
+                                checked = !clubFedere,
+                                onCheckedChange = { checked -> changerClubFedere(!checked) },
+                                modifier = Modifier.padding(horizontal = 10.dp)
+                            )
+                            Text(
+                                text = "Club non fédéré",
+                                fontWeight = if (!clubFedere) FontWeight.Bold else FontWeight.Normal,
+                                color = if (!clubFedere) TexteSelectionne else TexteNonSelectionne
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         // ── Mode de saisie : 2 boutons côte à côte ──────
                         // Fond vert d'origine conservé (pas de remplissage) : seul le cadre
@@ -125,45 +171,47 @@ private fun ContenuPrincipal() {
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(12.dp))
-                        HorizontalDivider()
-                        Spacer(modifier = Modifier.height(12.dp))
+                        if (!clubFedere) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            HorizontalDivider()
+                            Spacer(modifier = Modifier.height(12.dp))
 
-                        // ── Mode connexion : 2 boutons côte à côte ──────
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            listOf(
-                                false to "Local",
-                                true  to "Online"
-                            ).forEach { (valeur, label) ->
-                                val selected = modeOnline == valeur
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .border(
-                                            width = if (selected) BordureSelectionnee else BordureNonSelectionnee,
-                                            color = if (selected) CouleurSelectionnee else CouleurNonSelectionnee,
-                                            shape = RoundedCornerShape(8.dp)
+                            // ── Mode connexion : 2 boutons côte à côte ──────
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    false to "Local",
+                                    true  to "Online"
+                                ).forEach { (valeur, label) ->
+                                    val selected = modeOnline == valeur
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .border(
+                                                width = if (selected) BordureSelectionnee else BordureNonSelectionnee,
+                                                color = if (selected) CouleurSelectionnee else CouleurNonSelectionnee,
+                                                shape = RoundedCornerShape(8.dp)
+                                            )
+                                            .clickable { modeOnline = valeur }
+                                            .padding(vertical = 6.dp, horizontal = 4.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally
+                                    ) {
+                                        RadioButton(
+                                            selected = selected,
+                                            onClick  = { modeOnline = valeur },
+                                            modifier = Modifier.scale(0.8f).size(20.dp)
                                         )
-                                        .clickable { modeOnline = valeur }
-                                        .padding(vertical = 6.dp, horizontal = 4.dp),
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    RadioButton(
-                                        selected = selected,
-                                        onClick  = { modeOnline = valeur },
-                                        modifier = Modifier.scale(0.8f).size(20.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text      = label,
-                                        fontSize  = 20.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color     = if (selected) TexteSelectionne else TexteNonSelectionne,
-                                        textAlign = TextAlign.Center
-                                    )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text      = label,
+                                            fontSize  = 20.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color     = if (selected) TexteSelectionne else TexteNonSelectionne,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -189,23 +237,25 @@ private fun ContenuPrincipal() {
                             Text("🎮 Joueur")
                         }
 
-                        Spacer(modifier = Modifier.height(64.dp))
+                        if (!clubFedere) {
+                            Spacer(modifier = Modifier.height(64.dp))
 
-                        // ── Bouton Organisateur ─────────────────────────
-                        Button(
-                            onClick = {
-                                context.startActivity(
-                                    Intent(context, OrganisateurActivity::class.java).apply {
-                                        putExtra("mode_online", modeOnline)
-                                        putExtra("mode_jeu", modeJeu)
-                                    }
-                                )
-                            },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp)
-                        ) {
-                            Text("👔 Organisateur")
+                            // ── Bouton Organisateur ─────────────────────────
+                            Button(
+                                onClick = {
+                                    context.startActivity(
+                                        Intent(context, OrganisateurActivity::class.java).apply {
+                                            putExtra("mode_online", modeOnline)
+                                            putExtra("mode_jeu", modeJeu)
+                                        }
+                                    )
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp)
+                            ) {
+                                Text("👔 Organisateur")
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(24.dp))

@@ -260,7 +260,8 @@ fun ConnexionScreen(
 
                         val connected = ClientNetworkUtils.testConnection()
                         if (!connected) {
-                            messageErreur = "❌ Connexion échouée"
+                            val detail = ClientNetworkUtils.dernierErreurConnexion
+                            messageErreur = if (detail != null) "❌ Connexion échouée\n$detail" else "❌ Connexion échouée"
                             onMessage("Connexion échouée")
                             chargement = false
                             return@launch

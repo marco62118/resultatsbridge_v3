@@ -14,6 +14,7 @@ import app.resultatsbridge.common.AppScaffold
 import app.resultatsbridge.common.theme.BridgeServeurTheme
 import app.resultatsbridge.organisateur.data.DatabaseManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
@@ -56,6 +57,8 @@ import app.resultatsbridge.common.model.EquipeDonneInfo
 import app.resultatsbridge.common.model.Joueur
 import app.resultatsbridge.common.model.Mouvement
 import app.resultatsbridge.common.model.MouvementResult
+import app.resultatsbridge.common.utils.estTypeMitchellFamille
+import app.resultatsbridge.common.utils.positionMitchell
 import app.resultatsbridge.screens.AffichageDonneEcrant
 import app.resultatsbridge.screens.AffichageMainsLectureScreen
 import app.resultatsbridge.screens.AffichageMainsScreen
@@ -160,12 +163,31 @@ class ClientActivity : BaseActivity() {
                 // ── Écran d'erreur joueur ─────────────────────────────────────────
                 var erreurMessage by remember { mutableStateOf("") }
                 var erreurEtapeRetour by remember { mutableStateOf<EtapeClient>(EtapeClient.MOUVEMENT_EN_COURS) }
+                // Cas particulier "perte du Wi-Fi du tournoi" (voir plus bas) : remis a false
+                // ici pour ne pas laisser trainer un true d'une precedente erreur Wi-Fi sur
+                // une erreur differente ensuite.
+                var erreurEstWifi by remember { mutableStateOf(false) }
+
+                // Organisateur qui joue en local (useLocal) : ses propres saisies passent
+                // en direct par la base locale, jamais par le reseau — il ne remarquerait
+                // donc jamais que son Wi-Fi est coupe, alors que ca bloque tous les autres
+                // joueurs. Verifie periodiquement et affiche un bandeau (voir AppScaffold).
+                var wifiServeurCoupe by remember { mutableStateOf(false) }
+                LaunchedEffect(useLocal) {
+                    if (useLocal) {
+                        while (true) {
+                            wifiServeurCoupe = ClientNetworkUtils.reseauWifiActif() == null
+                            delay(3000)
+                        }
+                    }
+                }
                 val afficherErreur: (String, EtapeClient) -> Unit = { message, retour ->
                     val etapeNom = etape.value.name
                     val tournoiId = tournoi.value?.first ?: -1
                     val equipeNum = equipeChoisie.value?.equipeNumero ?: -1
                     erreurMessage = message
                     erreurEtapeRetour = retour
+                    erreurEstWifi = false
                     etape.value = EtapeClient.ERREUR
                     coroutineScope.launch(Dispatchers.IO) {
                         if (useLocal) DatabaseManager.enregistrerErreurLog(
@@ -488,7 +510,8 @@ class ClientActivity : BaseActivity() {
                 } else if (etape.value == EtapeClient.ERREUR) {
                     EcranErreurJoueur(
                         message = erreurMessage,
-                        onValider = { etape.value = erreurEtapeRetour }
+                        onValider = { etape.value = erreurEtapeRetour },
+                        estErreurWifi = erreurEstWifi
                     )
                     return@BridgeServeurTheme
 
@@ -690,7 +713,8 @@ class ClientActivity : BaseActivity() {
                         ipAddress = ipServeurExtra,
                         numeroTournoi = tournoi.value?.first,
                         equipeChoisie = equipeChoisie.value,
-                        nomEcran = nomEcranDebug
+                        nomEcran = nomEcranDebug,
+                        alerteWifiCoupe = wifiServeurCoupe
                     ) {
                         Log.i("ClientActivity", "🧭 ÉTAPE = ${etape.value}")
                         when (etape.value) {
@@ -1221,10 +1245,19 @@ class ClientActivity : BaseActivity() {
                                         "🔍 retour=$retour NBRE_DONNES=${TournoiConfig.NBRE_DONNES_PAR_TABLE} NBRE_MOUVEMENTS=${TournoiConfig.NBRE_MOUVEMENTS}"
                                     )
                                     if (retour < 0) {
+                                        val estErreurWifi = retour == -2
+                                        val messageErreurEnvoi = if (estErreurWifi) {
+                                            "Le téléphone n'est plus connecté au Wi-Fi du tournoi.\n\n" +
+                                            "Reconnectez-vous, puis réessayez."
+                                        } else {
+                                            "Résultat impossible à enregistrer."
+                                        }
                                         afficherErreur(
-                                            "Résultat impossible à enregistrer.",
+                                            messageErreurEnvoi,
                                             EtapeClient.MOUVEMENT_EN_COURS
-                                        ); return@LaunchedEffect
+                                        )
+                                        erreurEstWifi = estErreurWifi
+                                        return@LaunchedEffect
                                     }
                                     if (retour >= TournoiConfig.NBRE_DONNES_PAR_TABLE) {
                                         val mvntCourant = mouvement.value ?: return@LaunchedEffect
@@ -1431,12 +1464,9 @@ class ClientActivity : BaseActivity() {
 
                                                 lignes.map { c ->
                                                     val eq = mapEq[c.numeroEquipe]
-                                                    // En Mitchell : orientation fixe selon le numéro d'équipe
-                                                    // equipeNumero > nbreTables → NS, sinon → EO
-                                                    val orientation =
-                                                        if (typeTournoi == "Mitchell" || typeTournoi == "MitchellGueridon") {
-                                                            if (c.numeroEquipe > nbreTables) "NS" else "EO"
-                                                        } else null
+                                                    val position = if (estTypeMitchellFamille(typeTournoi)) {
+                                                        positionMitchell(c.numeroEquipe, nbreTables)
+                                                    } else null
 
                                                     ClassementItem(
                                                         rang = c.rang,
@@ -1446,7 +1476,8 @@ class ClientActivity : BaseActivity() {
                                                         joueur1Prenom = eq?.joueur1?.prenom ?: "?",
                                                         joueur2Nom = eq?.joueur2?.nom ?: "?",
                                                         joueur2Prenom = eq?.joueur2?.prenom ?: "?",
-                                                        orientationMitchell = orientation,
+                                                        orientationMitchell = position?.first,
+                                                        campIndexMitchell = position?.second,
                                                         scorePct = c.scorePct
                                                     )
                                                 }

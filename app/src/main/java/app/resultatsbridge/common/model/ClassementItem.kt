@@ -9,5 +9,6 @@ data class ClassementItem(
     val joueur2Nom: String,
     val joueur2Prenom: String,
     val orientationMitchell: String? = null,  // "NS", "EO", ou null si pas Mitchell
+    val campIndexMitchell: Int? = null,       // le "1" de "NS1", null si Howell
     val scorePct: Double = 0.0                // pourcentage Neuberg
 )
