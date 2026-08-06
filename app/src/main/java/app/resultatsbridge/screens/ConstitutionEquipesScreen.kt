@@ -15,11 +15,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -66,6 +68,18 @@ import kotlinx.coroutines.withContext
  * [nbreDonnesParTable] Mitchell/Guéridon uniquement (0 sinon).
  * [typeTournoi]        Connu seulement à l'Étape 3 (type déjà choisi).
  */
+
+// 06/08/2026 : forme commune à tous les boutons de l'écran de constitution des
+// équipes (rectangle à coins arrondis, au lieu de la forme "pilule" par défaut
+// de Material3) — demande explicite de Marco, pour un rendu cohérent avec les
+// cartes (JoueurCard, déjà en coins arrondis modestes).
+private val FormeBouton = RoundedCornerShape(12.dp)
+
+// 06/08/2026 : espace intérieur réduit (le défaut Material3 est 24dp de marge
+// horizontale, trop large pour les libellés de cette page) - pour que le texte
+// tienne sur une seule ligne malgré la colonne de droite plus étroite.
+private val PaddingBouton = PaddingValues(horizontal = 8.dp, vertical = 10.dp)
+
 @Composable
 fun ConstitutionEquipesScreen(
     idTournoi: Int,
@@ -342,24 +356,45 @@ fun ConstitutionEquipesScreen(
                 style = MaterialTheme.typography.titleMedium
             )
             Spacer(Modifier.height(4.dp))
-            Text(
-                "Équipes constituées : ${equipes.size}" +
-                        when {
-                            equipes.isEmpty()     -> ""
-                            equipes.size % 2 == 0 -> " ✅ nombre pair"
-                            else                  -> " ⚠️ nombre impair"
-                        },
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (equipes.isNotEmpty() && equipes.size % 2 != 0)
-                    MaterialTheme.colorScheme.error
-                else
-                    MaterialTheme.colorScheme.onSurface
-            )
+            // 06/08/2026 : "Équipe n°X" remonté ici, sur la même ligne que le
+            // compte/parité des équipes (au lieu d'être répété dans la colonne de
+            // droite) - le libellé "Équipes constituées :" est supprimé, il ne
+            // reste que le chiffre et le statut. Chaque texte est aligné avec sa
+            // colonne respective (même poids 1f que les 2 colonnes ci-dessous) :
+            // le compte/parité au-dessus de la colonne de gauche (joueurs
+            // disponibles), "Équipe n°X" au-dessus de la colonne de droite.
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    "${equipes.size}" +
+                            when {
+                                equipes.isEmpty()     -> ""
+                                equipes.size % 2 == 0 -> " ✅ nombre pair"
+                                else                  -> " ⚠️ nombre impair"
+                            },
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (equipes.isNotEmpty() && equipes.size % 2 != 0)
+                        MaterialTheme.colorScheme.error
+                    else
+                        MaterialTheme.colorScheme.onSurface
+                )
+                if (!afficherEquipes) {
+                    Text(
+                        "Équipe n°$numeroEquipe",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
         } else {
             Text(
                 "Constitution des $nombreEquipes équipes du tournoi $idTournoi",
                 style = MaterialTheme.typography.titleMedium
             )
+            if (!afficherEquipes) {
+                Spacer(Modifier.height(4.dp))
+                Text("Équipe n°$numeroEquipe", style = MaterialTheme.typography.titleMedium)
+            }
         }
 
         Spacer(Modifier.height(16.dp))
@@ -369,7 +404,7 @@ fun ConstitutionEquipesScreen(
 
                 LazyColumn(
                     modifier = Modifier
-                        .weight(1.4f)
+                        .weight(1f)
                         .fillMaxHeight()
                         .padding(end = 4.dp)
                 ) {
@@ -396,35 +431,51 @@ fun ConstitutionEquipesScreen(
                         .weight(1f)
                         .fillMaxHeight()
                 ) {
-                    Text("Équipe n°$numeroEquipe", style = MaterialTheme.typography.titleMedium)
-                    Spacer(Modifier.height(8.dp))
+                    // 06/08/2026 : "Équipe n°X" remonté dans l'en-tête commun ci-dessus
+                    // (sur la même ligne que le compte d'équipes), plus répété ici.
 
-                    joueur1?.let { j1 ->
-                        JoueurCard(
-                            joueur  = j1,
-                            onClick = {
-                                joueursDispo.add(j1)
-                                val sortedList = joueursDispo.sortedBy { it.prenom.lowercase() }
-                                joueursDispo.clear()
-                                joueursDispo.addAll(sortedList)
-                                joueur1 = null
-                                Log.i("ConstitutionEquipes", "🔄 ${j1.prenom} remis dans la liste")
-                            }
-                        )
+                    // 06/08/2026 : partie haute (variable) mise dans sa propre Column avec
+                    // weight(1f) - elle absorbe seule l'espace disponible, ce qui repousse la
+                    // partie basse (label "Nouveau joueur :", champs, boutons Ajouter/Importer)
+                    // à une position TOUJOURS fixe en bas de l'écran, quel que soit le contenu
+                    // affiché au-dessus (case "Valider les équipes" visible ou non, etc.).
+                    Column(modifier = Modifier.weight(1f)) {
+
+                    // 06/08/2026 : hauteur réservée fixe pour chaque emplacement joueur (que la
+                    // carte soit affichée ou non) - avant, les boutons ci-dessous (Valider
+                    // équipe, etc.) montaient/descendaient à chaque sélection/désélection d'un
+                    // joueur, causant des clics sur le mauvais bouton. Désormais les boutons ne
+                    // bougent plus jamais pendant la constitution d'une équipe.
+                    Box(modifier = Modifier.fillMaxWidth().height(64.dp)) {
+                        joueur1?.let { j1 ->
+                            JoueurCard(
+                                joueur  = j1,
+                                onClick = {
+                                    joueursDispo.add(j1)
+                                    val sortedList = joueursDispo.sortedBy { it.prenom.lowercase() }
+                                    joueursDispo.clear()
+                                    joueursDispo.addAll(sortedList)
+                                    joueur1 = null
+                                    Log.i("ConstitutionEquipes", "🔄 ${j1.prenom} remis dans la liste")
+                                }
+                            )
+                        }
                     }
 
-                    joueur2?.let { j2 ->
-                        JoueurCard(
-                            joueur  = j2,
-                            onClick = {
-                                joueursDispo.add(j2)
-                                val sortedList = joueursDispo.sortedBy { it.prenom.lowercase() }
-                                joueursDispo.clear()
-                                joueursDispo.addAll(sortedList)
-                                joueur2 = null
-                                Log.i("ConstitutionEquipes", "🔄 ${j2.prenom} remis dans la liste")
-                            }
-                        )
+                    Box(modifier = Modifier.fillMaxWidth().height(64.dp)) {
+                        joueur2?.let { j2 ->
+                            JoueurCard(
+                                joueur  = j2,
+                                onClick = {
+                                    joueursDispo.add(j2)
+                                    val sortedList = joueursDispo.sortedBy { it.prenom.lowercase() }
+                                    joueursDispo.clear()
+                                    joueursDispo.addAll(sortedList)
+                                    joueur2 = null
+                                    Log.i("ConstitutionEquipes", "🔄 ${j2.prenom} remis dans la liste")
+                                }
+                            )
+                        }
                     }
 
                     Spacer(Modifier.height(16.dp))
@@ -450,13 +501,21 @@ fun ConstitutionEquipesScreen(
                             }
                         },
                         enabled  = (joueur1 != null && joueur2 != null),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier.fillMaxWidth(),
+                        shape    = FormeBouton,
+                        contentPadding = PaddingBouton
                     ) {
-                        Text("Valider équipe")
+                        Text("Équipe suivante")
                     }
 
-                    if (estMitchell && equipes.size >= 2) {
-                        Spacer(Modifier.height(12.dp))
+                    // 06/08/2026 : le bouton "Valider les équipes" n'apparaît qu'à partir de
+                    // la 4e équipe (Mitchell exige au minimum 4 équipes/2 tables), et
+                    // disparaît complètement dès que le nombre d'équipes redevient impair
+                    // (au lieu de rester affiché et de rejeter le clic avec un message).
+                    if (estMitchell && equipes.size >= 4 && equipes.size % 2 == 0) {
+                        // Espace agrandi (05/08 : 12dp → 06/08 : 32dp) pour bien séparer ce
+                        // bouton du précédent et éviter un clic sur le mauvais bouton.
+                        Spacer(Modifier.height(32.dp))
                         Button(
                             onClick = {
                                 val numerosManquants = (1..equipes.size).filter { n ->
@@ -481,9 +540,11 @@ fun ConstitutionEquipesScreen(
                             modifier = Modifier.fillMaxWidth(),
                             colors   = ButtonDefaults.buttonColors(
                                 containerColor = MaterialTheme.colorScheme.tertiary
-                            )
+                            ),
+                            shape    = FormeBouton,
+                            contentPadding = PaddingBouton
                         ) {
-                            Text("✅ Valider le nombre d'équipes")
+                            Text("Valider les équipes")
                         }
 
                         messageParite?.let { msg ->
@@ -504,11 +565,15 @@ fun ConstitutionEquipesScreen(
                         }
                     }
 
-                    Spacer(Modifier.height(24.dp))
-                    HorizontalDivider()
-                    Spacer(Modifier.height(16.dp))
+                    } // fin de la Column haute (weight(1f))
 
-                    Text("Nouveau joueur :", style = MaterialTheme.typography.titleSmall)
+                    // 06/08/2026 : partie basse (fixe) - label "Nouveau joueur :", champs
+                    // Prénom/Nom et boutons Ajouter à l'équipe / Importer les joueurs. Reste
+                    // toujours à la même position en bas de l'écran (voir commentaire ci-dessus).
+                    Column {
+                        Spacer(Modifier.height(24.dp))
+
+                        Text("Nouveau joueur :", style = MaterialTheme.typography.titleSmall)
                     OutlinedTextField(
                         value         = nouveauPrenom,
                         onValueChange = { nouveauPrenom = it },
@@ -569,14 +634,14 @@ fun ConstitutionEquipesScreen(
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        colors   = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+                        colors   = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                        shape    = FormeBouton,
+                        contentPadding = PaddingBouton
                     ) {
                         Text("Ajouter à l'équipe")
                     }
 
                     if (!modeOnline) {
-                        Spacer(Modifier.height(16.dp))
-                        HorizontalDivider()
                         Spacer(Modifier.height(16.dp))
                         Button(
                             onClick = {
@@ -632,15 +697,18 @@ fun ConstitutionEquipesScreen(
                             },
                             enabled  = !importEnCours,
                             modifier = Modifier.fillMaxWidth(),
-                            colors   = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+                            colors   = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                            shape    = FormeBouton,
+                            contentPadding = PaddingBouton
                         ) {
-                            Text(if (importEnCours) "Importation..." else "☁️ Importer les joueurs")
+                            Text(if (importEnCours) "Importation..." else "Importer les joueurs")
                         }
                         msgImport?.let { msg ->
                             Spacer(Modifier.height(4.dp))
                             Text(msg, style = MaterialTheme.typography.bodySmall)
                         }
                     }
+                    } // fin de la Column basse (fixe)
                 }
             }
 

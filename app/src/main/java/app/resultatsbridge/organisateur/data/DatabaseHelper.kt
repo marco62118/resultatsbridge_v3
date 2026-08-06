@@ -77,6 +77,7 @@ object DatabaseHelper {
         // même style que le bloc MitchellGuéridon ci-dessus.
         ajouterPreregleHowell4t28d(database)
         ajouterPreregleHowell5t27d(database)
+        ajouterPreregleHowell7t26d(database)
         // Ajouter par_texte dans donnes si absent
         val colonnesDonnes = mutableSetOf<String>()
         database.rawQuery("PRAGMA table_info(donnes)", null).use { c ->
@@ -276,6 +277,142 @@ object DatabaseHelper {
             if (c.moveToFirst() && c.getInt(0) == 0) {
                 database.execSQL("INSERT INTO type (type, nombre_table, nombre_donne) VALUES ('Howell_5t27d', 5, 27)")
                 Log.i("DatabaseHelper", "🔧 Type Howell_5t27d ajouté dans la table type")
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // 06/08/2026 : préréglage Howell 7 tables / 26 donnes (13 mouvements ×
+    // 2 donnes) - NOUVEAU préréglage (aucun équivalent existant avant),
+    // transcrit intégralement depuis le carton officiel FFB "Howell classique
+    // 14 paires" (bridge-macon.fr, compatible FFBClubNet) - équipes/tables ET
+    // donnes, vérifié par script (14 équipes chacune 1x par mouvement, 26
+    // donnes distinctes par table, étuis disjoints entre tables à un même
+    // mouvement).
+    // ─────────────────────────────────────────────────────────────────────
+    private fun ajouterPreregleHowell7t26d(database: SQLiteDatabase) {
+        database.execSQL(
+            """CREATE TABLE IF NOT EXISTS "Howell_7t26d" (
+                "ID" INTEGER,
+                "mvnt_numero" INTEGER NOT NULL,
+                "table_numero" INTEGER NOT NULL,
+                "equipe_NS" INTEGER NOT NULL,
+                "equipe_EO" INTEGER NOT NULL,
+                "numero_d1" INTEGER NOT NULL,
+                "numero_d2" INTEGER NOT NULL,
+                PRIMARY KEY("ID" AUTOINCREMENT)
+            )"""
+        )
+        var nbreLignes = 0
+        database.rawQuery("SELECT COUNT(*) FROM Howell_7t26d", null).use { c ->
+            if (c.moveToFirst()) nbreLignes = c.getInt(0)
+        }
+        if (nbreLignes == 0) {
+            val lignes = listOf(
+                intArrayOf(1, 1, 14, 1, 1, 2),
+                intArrayOf(2, 1, 14, 2, 3, 4),
+                intArrayOf(3, 1, 14, 3, 5, 6),
+                intArrayOf(4, 1, 14, 4, 7, 8),
+                intArrayOf(5, 1, 14, 5, 9, 10),
+                intArrayOf(6, 1, 14, 6, 11, 12),
+                intArrayOf(7, 1, 14, 7, 13, 14),
+                intArrayOf(8, 1, 14, 8, 15, 16),
+                intArrayOf(9, 1, 14, 9, 17, 18),
+                intArrayOf(10, 1, 14, 10, 19, 20),
+                intArrayOf(11, 1, 14, 11, 21, 22),
+                intArrayOf(12, 1, 14, 12, 23, 24),
+                intArrayOf(13, 1, 14, 13, 25, 26),
+                intArrayOf(1, 2, 6, 9, 5, 6),
+                intArrayOf(2, 2, 7, 10, 7, 8),
+                intArrayOf(3, 2, 8, 11, 9, 10),
+                intArrayOf(4, 2, 9, 12, 11, 12),
+                intArrayOf(5, 2, 10, 13, 13, 14),
+                intArrayOf(6, 2, 11, 1, 15, 16),
+                intArrayOf(7, 2, 12, 2, 17, 18),
+                intArrayOf(8, 2, 13, 3, 19, 20),
+                intArrayOf(9, 2, 1, 4, 21, 22),
+                intArrayOf(10, 2, 2, 5, 23, 24),
+                intArrayOf(11, 2, 3, 6, 25, 26),
+                intArrayOf(12, 2, 4, 7, 1, 2),
+                intArrayOf(13, 2, 5, 8, 3, 4),
+                intArrayOf(1, 3, 5, 11, 7, 8),
+                intArrayOf(2, 3, 6, 12, 9, 10),
+                intArrayOf(3, 3, 7, 13, 11, 12),
+                intArrayOf(4, 3, 8, 1, 13, 14),
+                intArrayOf(5, 3, 9, 2, 15, 16),
+                intArrayOf(6, 3, 10, 3, 17, 18),
+                intArrayOf(7, 3, 11, 4, 19, 20),
+                intArrayOf(8, 3, 12, 5, 21, 22),
+                intArrayOf(9, 3, 13, 6, 23, 24),
+                intArrayOf(10, 3, 1, 7, 25, 26),
+                intArrayOf(11, 3, 2, 8, 1, 2),
+                intArrayOf(12, 3, 3, 9, 3, 4),
+                intArrayOf(13, 3, 4, 10, 5, 6),
+                intArrayOf(1, 4, 4, 13, 9, 10),
+                intArrayOf(2, 4, 5, 1, 11, 12),
+                intArrayOf(3, 4, 6, 2, 13, 14),
+                intArrayOf(4, 4, 7, 3, 15, 16),
+                intArrayOf(5, 4, 8, 4, 17, 18),
+                intArrayOf(6, 4, 9, 5, 19, 20),
+                intArrayOf(7, 4, 10, 6, 21, 22),
+                intArrayOf(8, 4, 11, 7, 23, 24),
+                intArrayOf(9, 4, 12, 8, 25, 26),
+                intArrayOf(10, 4, 13, 9, 1, 2),
+                intArrayOf(11, 4, 1, 10, 3, 4),
+                intArrayOf(12, 4, 2, 11, 5, 6),
+                intArrayOf(13, 4, 3, 12, 7, 8),
+                intArrayOf(1, 5, 7, 12, 19, 20),
+                intArrayOf(2, 5, 8, 13, 21, 22),
+                intArrayOf(3, 5, 9, 1, 23, 24),
+                intArrayOf(4, 5, 10, 2, 25, 26),
+                intArrayOf(5, 5, 11, 3, 1, 2),
+                intArrayOf(6, 5, 12, 4, 3, 4),
+                intArrayOf(7, 5, 13, 5, 5, 6),
+                intArrayOf(8, 5, 1, 6, 7, 8),
+                intArrayOf(9, 5, 2, 7, 9, 10),
+                intArrayOf(10, 5, 3, 8, 11, 12),
+                intArrayOf(11, 5, 4, 9, 13, 14),
+                intArrayOf(12, 5, 5, 10, 15, 16),
+                intArrayOf(13, 5, 6, 11, 17, 18),
+                intArrayOf(1, 6, 2, 3, 21, 22),
+                intArrayOf(2, 6, 3, 4, 23, 24),
+                intArrayOf(3, 6, 4, 5, 25, 26),
+                intArrayOf(4, 6, 5, 6, 1, 2),
+                intArrayOf(5, 6, 6, 7, 3, 4),
+                intArrayOf(6, 6, 7, 8, 5, 6),
+                intArrayOf(7, 6, 8, 9, 7, 8),
+                intArrayOf(8, 6, 9, 10, 9, 10),
+                intArrayOf(9, 6, 10, 11, 11, 12),
+                intArrayOf(10, 6, 11, 12, 13, 14),
+                intArrayOf(11, 6, 12, 13, 15, 16),
+                intArrayOf(12, 6, 13, 1, 17, 18),
+                intArrayOf(13, 6, 1, 2, 19, 20),
+                intArrayOf(1, 7, 8, 10, 23, 24),
+                intArrayOf(2, 7, 9, 11, 25, 26),
+                intArrayOf(3, 7, 10, 12, 1, 2),
+                intArrayOf(4, 7, 11, 13, 3, 4),
+                intArrayOf(5, 7, 12, 1, 5, 6),
+                intArrayOf(6, 7, 13, 2, 7, 8),
+                intArrayOf(7, 7, 1, 3, 9, 10),
+                intArrayOf(8, 7, 2, 4, 11, 12),
+                intArrayOf(9, 7, 3, 5, 13, 14),
+                intArrayOf(10, 7, 4, 6, 15, 16),
+                intArrayOf(11, 7, 5, 7, 17, 18),
+                intArrayOf(12, 7, 6, 8, 19, 20),
+                intArrayOf(13, 7, 7, 9, 21, 22)
+            )
+            lignes.forEach { l ->
+                database.execSQL(
+                    "INSERT INTO Howell_7t26d (mvnt_numero, table_numero, equipe_NS, equipe_EO, numero_d1, numero_d2) VALUES (?, ?, ?, ?, ?, ?)",
+                    l.toTypedArray()
+                )
+            }
+            Log.i("DatabaseHelper", "🔧 ${lignes.size} lignes de mouvement insérées dans Howell_7t26d")
+        }
+        database.rawQuery("SELECT COUNT(*) FROM type WHERE type = 'Howell_7t26d'", null).use { c ->
+            if (c.moveToFirst() && c.getInt(0) == 0) {
+                database.execSQL("INSERT INTO type (type, nombre_table, nombre_donne) VALUES ('Howell_7t26d', 7, 26)")
+                Log.i("DatabaseHelper", "🔧 Type Howell_7t26d ajouté dans la table type")
             }
         }
     }
