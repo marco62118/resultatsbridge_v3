@@ -39,19 +39,32 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Écran de constitution des équipes, commun à tous les types de tournoi.
+ * Écran de constitution des équipes — réutilisé aux Étapes 1 ET 3 du flux de
+ * création (05/08/2026, plan "Inverser l'ordre de création d'un tournoi").
  *
- * Flux : CreationTournoiActivity crée le tournoi en BD, obtient un idTournoi,
- * puis lance ConstitutionEquipesActivity qui affiche cet écran.
- * Le tournoi est donc déjà persisté avant d'arriver ici.
+ * **Étape 1** (`idTournoi == -1`) : lancée directement depuis
+ * OrganisateurActivity, AVANT tout choix de type de tournoi — aucune ligne
+ * `tournois` n'existe encore en base, `nombreEquipes`/`typeTournoi` ne sont
+ * pas connus. Ne fait que construire la liste d'équipes en mémoire (nombre
+ * pair contrôlé), le bouton "Continuer →" transmet cette liste à l'écran de
+ * choix du type (`CreationTournoiActivity`).
  *
- * [idTournoi]          ID du tournoi déjà créé en BD.
- * [joueursInitiaux]    Liste des joueurs disponibles pour former les équipes.
- * [nombreEquipes]      Nombre d'équipes attendu (Howell) ou -1 pour Mitchell (libre).
+ * **Étape 3** (`idTournoi > 0`) : relancée depuis `CreationTournoiActivity`
+ * une fois le type choisi et la ligne `tournois` réellement créée — affiche
+ * la liste `equipesInitiales` (déjà construite à l'Étape 1) avec ses
+ * positions NS/EO/table, encore modifiable, et "Enregistrer et Démarrer" fait
+ * l'enregistrement réel en base.
+ *
+ * [idTournoi]          -1 (Étape 1, aucun tournoi créé) ou l'ID réel (Étape 3).
+ * [joueursInitiaux]    Pool de joueurs pour l'Étape 1 (tous les joueurs du club).
+ * [joueursRestants]    Pool de joueurs pour l'Étape 3 (ceux pas encore utilisés
+ *                      à la fin de l'Étape 1) — permet de "remplacer un joueur"
+ *                      d'une équipe déjà constituée.
+ * [equipesInitiales]   Liste d'équipes déjà construite (Étape 3 seulement).
+ * [nombreEquipes]      -1 pour Mitchell/Guéridon, nombre réel pour Howell.
  * [modeOnline]         true = serveur distant alwaysdata, false = serveur embarqué NanoHTTPD.
- * [nbreDonnesParTable] Donnes par table (Mitchell uniquement, 0 sinon).
- * [typeTournoi]        Type de tournoi transmis par CreationTournoiActivity.
- *                      Utilisé localement pour le calcul Guéridon — jamais renvoyé au serveur.
+ * [nbreDonnesParTable] Mitchell/Guéridon uniquement (0 sinon).
+ * [typeTournoi]        Connu seulement à l'Étape 3 (type déjà choisi).
  */
 @Composable
 fun ConstitutionEquipesScreen(
@@ -60,24 +73,37 @@ fun ConstitutionEquipesScreen(
     nombreEquipes: Int,
     modeOnline: Boolean = false,
     nbreDonnesParTable: Int = 0,
-    typeTournoi: String = ""
+    typeTournoi: String = "",
+    joueursRestants: List<Joueur> = emptyList(),
+    equipesInitiales: List<Equipe> = emptyList(),
+    // Étape 2 (05/08/2026) : appelé par le bouton "Continuer →" avec la liste
+    // d'équipes déjà construite ET le pool de joueurs pas encore utilisés
+    // (nécessaire pour "remplacer un joueur" à l'Étape 3), pour lancer le
+    // choix du type de tournoi. Ne sert qu'à l'Étape 1 (idTournoi == -1).
+    onEquipesValidees: (List<Equipe>, List<Joueur>) -> Unit = { _, _ -> }
 ) {
     Log.i("ConstitutionEquipes", "👥 ${joueursInitiaux.size} joueurs disponibles")
     val context  = LocalContext.current
     val activity = context as? Activity
     val scope    = rememberCoroutineScope()
 
+    // Étape 3 : le tournoi existe déjà (ligne `tournois` créée par
+    // CreationTournoiActivity) — c'est ce qui distingue les 2 réutilisations
+    // de cet écran, pas idTournoi seul (qui vaut -1 puis un vrai ID).
+    val estEtape3 = idTournoi > 0
+
     val estMitchell  = nombreEquipes == -1
     val estGueridon  = estMitchell && typeTournoi == "MitchellGueridon"
 
     var joueursDispo = remember {
         mutableStateListOf<Joueur>().apply {
-            addAll(joueursInitiaux.sortedBy { it.prenom.lowercase() })
+            val pool = if (estEtape3) joueursRestants else joueursInitiaux
+            addAll(pool.sortedBy { it.prenom.lowercase() })
         }
     }
     var joueur1         by remember { mutableStateOf<Joueur?>(null) }
     var joueur2         by remember { mutableStateOf<Joueur?>(null) }
-    var equipes         by remember { mutableStateOf<List<Equipe>>(emptyList()) }
+    var equipes         by remember { mutableStateOf(equipesInitiales) }
     // Numéro de la prochaine équipe à créer : le plus petit numéro pas encore utilisé.
     // Réutilise automatiquement un numéro libéré par une suppression, sans jamais
     // renuméroter les équipes déjà constituées (elles gardent leur table/position).
@@ -89,7 +115,9 @@ fun ConstitutionEquipesScreen(
             n
         }
     }
-    var afficherEquipes by remember { mutableStateOf(false) }
+    // Étape 3 : va directement à la revue (équipes déjà constituées à l'Étape 1),
+    // pas besoin de recliquer "Valider".
+    var afficherEquipes by remember { mutableStateOf(estEtape3 && equipesInitiales.isNotEmpty()) }
     var nouveauNom      by remember { mutableStateOf("") }
     var nouveauPrenom   by remember { mutableStateOf("") }
     var messageParite   by remember { mutableStateOf<String?>(null) }
@@ -150,6 +178,11 @@ fun ConstitutionEquipesScreen(
     }
 
     var equipeASupprimer by remember { mutableStateOf<Equipe?>(null) }
+    // 06/08/2026 : après une suppression qui laisse un nombre d'équipes impair,
+    // demande explicitement quoi faire au lieu de renvoyer directement vers l'écran
+    // d'ajout d'une équipe — signalé par Marco : supprimer une 2e équipe (pour
+    // revenir à un nombre pair) est aussi légitime qu'en ajouter une nouvelle.
+    var demanderActionApresSuppression by remember { mutableStateOf(false) }
 
     // Supprime une équipe déjà constituée : ses 2 joueurs retournent dans le pool,
     // les autres équipes ne bougent pas (leur numéro est conservé). Le numéro libéré
@@ -161,10 +194,30 @@ fun ConstitutionEquipesScreen(
         joueursDispo.clear()
         joueursDispo.addAll(sortedList)
 
-        equipes = equipes.filter { it.equipeNumero != equipe.equipeNumero }
+        val restantes = equipes.filter { it.equipeNumero != equipe.equipeNumero }
 
-        messageParite   = null
-        afficherEquipes = false
+        messageParite = null
+        if (restantes.size % 2 != 0) {
+            // Nombre impair après suppression : on demande quoi faire au lieu de
+            // forcer directement l'ajout d'une équipe (voir le dialog plus bas).
+            equipes = restantes
+            demanderActionApresSuppression = true
+        } else {
+            // Redevenu pair (ex. 2e suppression d'affilée) : à l'Étape 3 uniquement,
+            // renumérote 1..N (garde l'ordre relatif actuel) - demande explicite de
+            // Marco le 06/08/2026, sinon les positions NS/EO/table calculées à partir
+            // de numéros avec des trous seraient fausses. Pas fait à l'Étape 1 : la
+            // règle "ne jamais renuméroter" reste pertinente là-bas, où une équipe
+            // supprimée est toujours censée être remplacée par une nouvelle (les
+            // flèches monter/descendre suffisent pour réorganiser sans supprimer).
+            equipes = if (estEtape3) {
+                restantes.sortedBy { it.equipeNumero }
+                    .mapIndexed { index, e -> e.copy(equipeNumero = index + 1) }
+            } else {
+                restantes
+            }
+            afficherEquipes = true
+        }
         Log.i("ConstitutionEquipes", "🗑️ Équipe ${equipe.equipeNumero} supprimée, joueurs remis dans le pool, numéro libéré")
     }
 
@@ -226,6 +279,29 @@ fun ConstitutionEquipesScreen(
         )
     }
 
+    // 06/08/2026 : après une suppression laissant un nombre impair d'équipes, demande
+    // explicitement quoi faire plutôt que de renvoyer directement vers l'écran d'ajout
+    // (supprimer une 2e équipe pour revenir à un nombre pair est tout aussi légitime).
+    if (demanderActionApresSuppression) {
+        AlertDialog(
+            onDismissRequest = { demanderActionApresSuppression = false; afficherEquipes = true },
+            title   = { Text("Nombre d'équipes impair (${equipes.size})") },
+            text    = { Text("Voulez-vous supprimer une autre équipe, ou en ajouter une nouvelle ?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    demanderActionApresSuppression = false
+                    afficherEquipes = false
+                }) { Text("Ajouter une équipe") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    demanderActionApresSuppression = false
+                    afficherEquipes = true
+                }) { Text("Supprimer une autre équipe") }
+            }
+        )
+    }
+
     if (showDialogPasInternetVisiteur) {
         AlertDialog(
             onDismissRequest = { showDialogPasInternetVisiteur = false },
@@ -262,7 +338,7 @@ fun ConstitutionEquipesScreen(
 
         if (estMitchell) {
             Text(
-                "Constitution des équipes Mitchell (tournoi $idTournoi)",
+                "Constitution des équipes",
                 style = MaterialTheme.typography.titleMedium
             )
             Spacer(Modifier.height(4.dp))
@@ -568,8 +644,11 @@ fun ConstitutionEquipesScreen(
                 }
             }
 
-        } else {
-            // --- AFFICHAGE FINAL ---
+        } else if (estEtape3) {
+            // --- ÉTAPE 3 (05/08/2026) : revue avec positions + enregistrement réel ---
+            // Restauré depuis ce qui existait avant l'Étape 1 (retiré temporairement car
+            // le tournoi n'existait pas encore à ce moment du flux) - logique inchangée,
+            // juste redéplacée ici et gardée derrière estEtape3 (idTournoi > 0).
             LazyColumn(modifier = Modifier.fillMaxSize()) {
 
                 if (estMitchell) {
@@ -578,6 +657,11 @@ fun ConstitutionEquipesScreen(
                     // Mitchell  : nbreMouvements = nbreTables - 1 si nbreTables pair
                     val nbreMouvements = if (estGueridon) nbreTables
                                          else if (nbreTables % 2 == 0) nbreTables - 1 else nbreTables
+                    // Mitchell classique à nombre de tables pair : saut nécessaire (voir
+                    // EcranChangementMouvement.kt::aSaute) - ici on ne fait qu'expliquer le
+                    // mécanisme, pas le recalculer.
+                    val aSkip = !estGueridon && nbreTables % 2 == 0
+                    val mvntSaut = nbreTables / 2 + 1
 
                     item {
                         Card(
@@ -588,16 +672,62 @@ fun ConstitutionEquipesScreen(
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    if (estGueridon) "📊 Récapitulatif Mitchell Guéridon"
+                                    if (estGueridon) "📊 Mitchell Guéridon"
+                                    else if (aSkip)  "📊 Mitchell — saut à mi-parcours"
                                     else             "📊 Récapitulatif Mitchell",
                                     style = MaterialTheme.typography.titleSmall
                                 )
                                 Spacer(Modifier.height(4.dp))
-                                Text("Équipes      : ${equipes.size}")
-                                Text("Tables       : $nbreTables")
-                                Text("Mouvements   : $nbreMouvements")
-                                Text("Donnes/table : $nbreDonnesParTable")
-                                Text("Total donnes : ${nbreTables * nbreDonnesParTable}")
+                                // Explications succinctes (Guéridon/saut) à la place du
+                                // récapitulatif chiffré - demandé par Marco le 06/08/2026,
+                                // vérifiées à la main avec lui table par table (voir la
+                                // session du 05/08 pour le détail des formules).
+                                if (estGueridon) {
+                                    Text(
+                                        "Les équipes NS ne bougent pas. Les EO montent vers la " +
+                                                "table supérieure. Les donnes vont vers les tables inférieures."
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "Le guéridon (relais de donnes) se trouve entre les tables " +
+                                                "${nbreTables / 2} et $mvntSaut : la table $mvntSaut y dépose ses " +
+                                                "donnes jouées, la table ${nbreTables / 2} vient chercher les " +
+                                                "donnes sur le guéridon."
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("La dernière table (Table $nbreTables) partage le set de donnes avec la Table 1.")
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "Avantage : toutes les équipes se rencontrent et tous les sets " +
+                                                "sont joués — autant de rencontres et de sets que de tables.",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                } else if (aSkip) {
+                                    Text(
+                                        "Les équipes NS ne bougent pas. Les EO montent vers la " +
+                                                "table supérieure. Les donnes vont vers les tables inférieures."
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "Avec $nbreTables tables (nombre pair), un saut est nécessaire " +
+                                                "au mouvement $mvntSaut : les équipes EO sautent une table " +
+                                                "supplémentaire pour éviter de rejouer les mêmes donnes. " +
+                                                "L'écran de mouvement affichera \"sauté la table\" pour les " +
+                                                "équipes EO au mouvement $mvntSaut."
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "Inconvénient : toutes les équipes ne se rencontrent pas — une " +
+                                                "rencontre et un set de donnes en moins que de tables.",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                } else {
+                                    Text("Équipes      : ${equipes.size}")
+                                    Text("Tables       : $nbreTables")
+                                    Text("Mouvements   : $nbreMouvements")
+                                    Text("Donnes/table : $nbreDonnesParTable")
+                                    Text("Total donnes : ${nbreTables * nbreDonnesParTable}")
+                                }
                             }
                         }
                     }
@@ -654,9 +784,68 @@ fun ConstitutionEquipesScreen(
                     }
                 }
 
+                // 06/08/2026 : après une ou plusieurs suppressions, le type de tournoi
+                // choisi à l'étape précédente peut ne plus être compatible avec le nombre
+                // d'équipes restant - Mitchell simple se recalcule tout seul (jamais invalide
+                // ici), mais Howell exige un nombre exact d'équipes (préréglage fixe) et
+                // Guéridon exige un multiple de 4. Bloque l'enregistrement dans ce cas plutôt
+                // que de laisser démarrer un tournoi incohérent.
+                val typeCompatible = when {
+                    estGueridon  -> equipes.size % 4 == 0
+                    estMitchell  -> true // parité déjà garantie par supprimerEquipe
+                    else         -> equipes.size == nombreEquipes // Howell : préréglage fixe
+                }
+
+                if (!typeCompatible) {
+                    item {
+                        Spacer(Modifier.height(16.dp))
+                        Card(
+                            colors   = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.errorContainer
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                val texteProbleme = if (estGueridon) {
+                                    val prochainMultiple = ((equipes.size / 4) + 1) * 4
+                                    "Un Guéridon exige un nombre d'équipes multiple de 4 " +
+                                            "(actuellement ${equipes.size}). Il faut changer de " +
+                                            "type de tournoi ou rajouter ${prochainMultiple - equipes.size} équipe(s)."
+                                } else {
+                                    "Ce type de tournoi exige exactement $nombreEquipes équipes " +
+                                            "(actuellement ${equipes.size}). Il faut changer de type " +
+                                            "de tournoi ou rajouter ${nombreEquipes - equipes.size} équipe(s)."
+                                }
+                                Text(texteProbleme, color = MaterialTheme.colorScheme.onErrorContainer)
+                                Spacer(Modifier.height(12.dp))
+                                Button(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick  = { afficherEquipes = false }
+                                ) { Text("Retour aux équipes") }
+                                Spacer(Modifier.height(8.dp))
+                                OutlinedButton(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick  = {
+                                        // RESULT_FIRST_USER (pas RESULT_OK ni CANCELED) :
+                                        // signale à CreationTournoiActivity "équipes mises à
+                                        // jour, pas un succès final" - voir son launcher.
+                                        val retourIntent = Intent().apply {
+                                            putParcelableArrayListExtra("equipes", ArrayList(equipes))
+                                            putParcelableArrayListExtra("joueurs_restants", ArrayList(joueursDispo))
+                                        }
+                                        activity?.setResult(Activity.RESULT_FIRST_USER, retourIntent)
+                                        activity?.finish()
+                                    }
+                                ) { Text("Retour au choix du type") }
+                            }
+                        }
+                    }
+                }
+
                 item {
                     Spacer(Modifier.height(16.dp))
                     Button(
+                        enabled  = typeCompatible,
                         modifier = Modifier.fillMaxWidth(),
                         onClick  = {
                             Log.i("ConstitutionEquipes", "🖱️ Enregistrement final")
@@ -730,6 +919,7 @@ fun ConstitutionEquipesScreen(
                                     val resultIntent = Intent().apply {
                                         putExtra("equipes_success", true)
                                         putExtra("id_tournoi", idTournoi)
+                                        putExtra("type_tournoi", typeTournoi)
                                     }
                                     activity?.setResult(Activity.RESULT_OK, resultIntent)
                                     activity?.finish()
@@ -738,6 +928,50 @@ fun ConstitutionEquipesScreen(
                         }
                     ) {
                         Text("Enregistrer et Démarrer")
+                    }
+                }
+            }
+
+        } else {
+            // --- ÉTAPE 1 (05/08/2026) : simple confirmation, sans type ni tournoi connu ---
+            // Le récapitulatif complet (positions NS/EO/table, mouvements, import .bws,
+            // enregistrement réel en base) n'a de sens qu'une fois le type de tournoi
+            // choisi (positions Howell notamment, lues en BD par idTournoi - qui n'existe
+            // pas encore à ce stade) — affiché à l'Étape 3 (ci-dessus, estEtape3) une fois
+            // CreationTournoiActivity passée.
+            LazyColumn(modifier = Modifier.fillMaxSize()) {
+                item {
+                    Text(
+                        "${equipes.size} équipes prêtes (${equipes.size / 2} tables) :",
+                        style = MaterialTheme.typography.titleSmall
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
+                itemsIndexed(equipes) { index, equipe ->
+                    EquipeItem(
+                        equipe              = equipe,
+                        orientationMitchell = null,
+                        tableMitchell       = null,
+                        onSupprimer         = { equipeASupprimer = equipe },
+                        onRemplacerJoueur   = { numJoueur -> remplacerJoueur(equipe, numJoueur) },
+                        afficherFleches     = true,
+                        onMonter            = if (index > 0) { { intervertirEquipes(equipe, equipes[index - 1]) } } else null,
+                        onDescendre         = if (index < equipes.size - 1) { { intervertirEquipes(equipe, equipes[index + 1]) } } else null
+                    )
+                }
+                item {
+                    Spacer(Modifier.height(16.dp))
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick  = {
+                            // Étape 2 : lance le choix du type de tournoi avec cette liste
+                            // d'équipes déjà construite (aucune écriture BD ici, la ligne
+                            // `tournois` n'est créée qu'une fois le type choisi).
+                            Log.i("ConstitutionEquipes", "➡️ ${equipes.size} équipes validées, direction choix du type")
+                            onEquipesValidees(equipes, joueursDispo.toList())
+                        }
+                    ) {
+                        Text("Continuer →")
                     }
                 }
             }

@@ -135,12 +135,29 @@ class OrganisateurActivity : BaseActivity() {
             }
         }
 
+        // Étape 1 (05/08/2026) : ce launcher reçoit désormais le résultat de l'écran de
+        // constitution des équipes en PREMIER (avant tout choix de type - voir les 2 boutons
+        // "Créer un tournoi"/"Créer un tournoi Online" ci-dessous). Son bouton "Continuer →"
+        // est un placeholder qui ne fait ni setResult ni finish() pour l'instant (rien à
+        // enregistrer, aucun tournoi n'existe encore) : un retour arrière système donne donc
+        // RESULT_CANCELED ici, la condition ci-dessous ne se déclenche pas - comportement
+        // attendu tant que l'Étape 2 (choix du type) n'existe pas pour relancer la suite.
         constitutionLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK) {
                 val data = result.data
                 val equipesSuccess = data?.getBooleanExtra("equipes_success", false) ?: false
                 val idTournoi = data?.getIntExtra("id_tournoi", -1) ?: -1
                 if (equipesSuccess && idTournoi != -1) {
+                    // Bug trouvé le 05/08/2026 : creationLauncher (qui faisait ceci avant)
+                    // n'est plus jamais appelé dans le nouveau flux Étapes 1-2-3 (Constitution
+                    // -> CreationTournoi -> Constitution) - sans cette assignation,
+                    // idTournoiState restait sur un ID périmé (dernier tournoi FERMÉ, lu au
+                    // tout premier démarrage), faisant échouer "Oui je veux jouer" (chemin
+                    // direct en base, useLocal) avec "Impossible de charger le tournoi" —
+                    // alors que la connexion réseau normale (qui redemande l'ID) fonctionnait.
+                    idTournoiState.value = idTournoi
+                    val typeRecu = data?.getStringExtra("type_tournoi")
+                    if (typeRecu != null) typeTournoiState.value = typeRecu
                     tournoiOuvertState.value = true  // constitution réussie — onResume() lancera Participation
                 } else Toast.makeText(this, "Enregistrement des équipes échoué", Toast.LENGTH_LONG).show()
             }
@@ -615,16 +632,27 @@ class OrganisateurActivity : BaseActivity() {
                                             }
                                             participationLauncher.launch(intent)
                                         } else {
-                                            val intent = Intent(
-                                                this@OrganisateurActivity,
-                                                CreationTournoiActivity::class.java
-                                            ).apply {
-                                                putExtra("ip_serveur", ip); putExtra(
-                                                "mode_online",
-                                                false
-                                            )
+                                            // Étape 1 (05/08/2026, plan "Inverser l'ordre de
+                                            // création d'un tournoi") : on lance directement la
+                                            // constitution des équipes, AVANT tout choix de type -
+                                            // idTournoi=-1/nombreEquipes=-1 (rien n'existe encore
+                                            // en base). CreationTournoiActivity sera relancée
+                                            // depuis là (Étape 2, pas encore construite) une fois
+                                            // les équipes prêtes.
+                                            scope.launch {
+                                                val joueurs = DatabaseManager.getTousLesJoueurs(this@OrganisateurActivity)
+                                                val intent = Intent(
+                                                    this@OrganisateurActivity,
+                                                    ConstitutionEquipesActivity::class.java
+                                                ).apply {
+                                                    putExtra("id_tournoi", -1)
+                                                    putExtra("nombre_equipes", -1)
+                                                    putParcelableArrayListExtra("joueurs", ArrayList(joueurs))
+                                                    putExtra("mode_online", false)
+                                                    putExtra("ip_serveur", ip)
+                                                }
+                                                constitutionLauncher.launch(intent)
                                             }
-                                            creationLauncher.launch(intent)
                                         }
                                     }
                                 },
@@ -969,16 +997,24 @@ class OrganisateurActivity : BaseActivity() {
                                 if (!tournoiOuvertState.value) {
                                     Button(
                                         onClick = {
-                                            val intent = Intent(
-                                                this@OrganisateurActivity,
-                                                CreationTournoiActivity::class.java
-                                            ).apply {
-                                                putExtra(
-                                                    "ip_serveur",
-                                                    URL_SERVEUR_ONLINE
-                                                ); putExtra("mode_online", true)
+                                            // Étape 1 (05/08/2026) : voir le commentaire équivalent
+                                            // sur le bouton local ("Créer un nouveau tournoi").
+                                            scope.launch {
+                                                val joueurs = withContext(Dispatchers.IO) {
+                                                    ClientNetworkUtils.getTousLesJoueurs()
+                                                }
+                                                val intent = Intent(
+                                                    this@OrganisateurActivity,
+                                                    ConstitutionEquipesActivity::class.java
+                                                ).apply {
+                                                    putExtra("id_tournoi", -1)
+                                                    putExtra("nombre_equipes", -1)
+                                                    putParcelableArrayListExtra("joueurs", ArrayList(joueurs))
+                                                    putExtra("mode_online", true)
+                                                    putExtra("ip_serveur", URL_SERVEUR_ONLINE)
+                                                }
+                                                constitutionLauncher.launch(intent)
                                             }
-                                            creationLauncher.launch(intent)
                                         },
                                         modifier = Modifier.fillMaxWidth(),
                                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 5.dp)

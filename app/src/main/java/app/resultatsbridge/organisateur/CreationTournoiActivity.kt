@@ -1,6 +1,7 @@
 ﻿// ACTIVITÉ : Création de tournoi — type, nombre de tables, équipes, paramètres
 package app.resultatsbridge.organisateur
 
+import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
@@ -24,6 +25,8 @@ import app.resultatsbridge.organisateur.data.DatabaseManager
 import app.resultatsbridge.client.ClientNetworkUtils
 import app.resultatsbridge.common.model.CreationTournoiResult
 import app.resultatsbridge.common.model.DonneAvantTournoi
+import app.resultatsbridge.common.model.Equipe
+import app.resultatsbridge.common.model.Joueur
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -49,6 +52,20 @@ data class TypeTournoiInfo(
     }
 }
 
+// Étape 2 (05/08/2026, plan "Inverser l'ordre de création d'un tournoi") : le nombre
+// d'équipes est maintenant connu AVANT le choix du type (constitué à l'étape précédente),
+// donc on peut filtrer les types réellement compatibles au lieu de tous les proposer.
+//   - Howell / par4equ2t21d (tables != 0) : préréglage fixe, exige une correspondance exacte.
+//   - MitchellGueridon : exige un nombre de tables pair, donc un nombre d'équipes multiple
+//     de 4 - règle vérifiée le 05/08/2026 contre une source primaire (voir DatabaseManager.kt,
+//     positionChaineGueridon), jamais codée nulle part avant aujourd'hui.
+//   - Mitchell (les autres) : simple parité, comme déjà contrôlé à la constitution d'équipes.
+fun estCompatible(type: TypeTournoiInfo, nbreEquipes: Int): Boolean = when {
+    type.tables != 0                   -> type.tables * 2 == nbreEquipes
+    type.nomBrut == "MitchellGueridon" -> nbreEquipes % 4 == 0
+    else                                -> nbreEquipes % 2 == 0
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 class CreationTournoiActivity : BaseActivity() {
 
@@ -57,8 +74,17 @@ class CreationTournoiActivity : BaseActivity() {
 
         val ipServeur  = intent.getStringExtra("ip_serveur") ?: ""
         val modeOnline = intent.getBooleanExtra("mode_online", false)
+        // Étape 2 (05/08/2026) : équipes déjà constituées, transmises par
+        // ConstitutionEquipesActivity - le type de tournoi proposé ci-dessous est
+        // filtré selon leur nombre (voir estCompatible). Valeurs initiales seulement -
+        // deviennent un état Compose plus bas, car l'Étape 3 peut les faire évoluer
+        // (suppression d'équipes) et revenir ici pour changer de type (06/08/2026).
+        @Suppress("DEPRECATION")
+        val equipesRecuesInitial = intent.getParcelableArrayListExtra<Equipe>("equipes") ?: arrayListOf()
+        @Suppress("DEPRECATION")
+        val joueursRestantsInitial = intent.getParcelableArrayListExtra<Joueur>("joueurs_restants") ?: arrayListOf()
 
-        Log.i("CreationTournoiActivity", "🚀 Démarrage - modeOnline=$modeOnline")
+        Log.i("CreationTournoiActivity", "🚀 Démarrage - modeOnline=$modeOnline, ${equipesRecuesInitial.size} équipes reçues")
 
         if (modeOnline) {
             ClientNetworkUtils.initialiserServeur(ipServeur)
@@ -71,6 +97,42 @@ class CreationTournoiActivity : BaseActivity() {
                 val isLoading = remember { mutableStateOf(true) }
                 var selectedOption by remember { mutableStateOf<TypeTournoiInfo?>(null) }
                 var expanded by remember { mutableStateOf(false) }
+
+                // État (pas juste des val) : l'Étape 3 peut revenir ici avec une liste
+                // d'équipes réduite (suppression), voir constitutionEtape3Launcher plus bas.
+                var equipesRecues by remember { mutableStateOf(equipesRecuesInitial) }
+                var joueursRestantsRecus by remember { mutableStateOf(joueursRestantsInitial) }
+                val nbreEquipesConnu = equipesRecues.size
+
+                // Étape 3 (05/08/2026) : lance ConstitutionEquipesActivity une 2ᵉ fois (revue
+                // des équipes avec positions + enregistrement réel) une fois le tournoi créé.
+                // 3 issues possibles au retour (06/08/2026) :
+                //  - RESULT_OK : succès final, relayé tel quel vers l'appelant.
+                //  - RESULT_FIRST_USER : équipes modifiées (suppression) mais type devenu
+                //    incompatible - l'équipe demande à changer de type ; on met à jour
+                //    equipesRecues/joueursRestantsRecus pour que le filtrage et un futur
+                //    aller-retour reflètent la liste réduite, sans quitter cet écran.
+                //  - RESULT_CANCELED (retour arrière simple) : rien à faire.
+                val constitutionEtape3Launcher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.StartActivityForResult()
+                ) { result ->
+                    when (result.resultCode) {
+                        Activity.RESULT_OK -> {
+                            setResult(Activity.RESULT_OK, result.data)
+                            finish()
+                        }
+                        Activity.RESULT_FIRST_USER -> {
+                            @Suppress("DEPRECATION")
+                            val equipesMaj = result.data?.getParcelableArrayListExtra<Equipe>("equipes")
+                            @Suppress("DEPRECATION")
+                            val joueursMaj = result.data?.getParcelableArrayListExtra<Joueur>("joueurs_restants")
+                            if (equipesMaj != null) equipesRecues = equipesMaj
+                            if (joueursMaj != null) joueursRestantsRecus = joueursMaj
+                            Log.i("CreationTournoiActivity", "🔄 Retour Étape 3 : ${equipesMaj?.size} équipes mises à jour")
+                        }
+                        else -> {}
+                    }
+                }
 
                 // Nombre de donnes par table saisi par l'organisateur (Mitchell uniquement)
                 var nbreDonnesParTableSaisie by remember { mutableStateOf("4") }
@@ -127,8 +189,20 @@ class CreationTournoiActivity : BaseActivity() {
                         }
                     }
                     optionsTypes.value = liste
-                    selectedOption = liste.firstOrNull()
+                    // Étape 2 : ne proposer que les types compatibles avec le nombre
+                    // d'équipes déjà constitué (voir estCompatible ci-dessus).
+                    selectedOption = liste.firstOrNull { estCompatible(it, nbreEquipesConnu) }
                     isLoading.value = false
+                }
+
+                // 06/08/2026 : re-sélectionne un type valide quand on revient de l'Étape 3
+                // avec une liste d'équipes modifiée (nbreEquipesConnu a changé) - sans
+                // recharger la liste des types elle-même (déjà en cache, pas besoin de
+                // refaire l'appel réseau/BD ci-dessus).
+                LaunchedEffect(nbreEquipesConnu) {
+                    if (optionsTypes.value.isNotEmpty()) {
+                        selectedOption = optionsTypes.value.firstOrNull { estCompatible(it, nbreEquipesConnu) }
+                    }
                 }
 
                 // Dialog d'avertissement (utilisé pour Howell, pas Mitchell)
@@ -150,13 +224,18 @@ class CreationTournoiActivity : BaseActivity() {
                                 if (!estBloque) {
                                     val r = resultatEnAttente
                                     if (r != null) {
-                                        val resultIntent = Intent().apply {
+                                        // Étape 3 : lance la revue des équipes (positions +
+                                        // enregistrement réel), le tournoi vient d'être créé.
+                                        val intentEtape3 = Intent(this@CreationTournoiActivity, ConstitutionEquipesActivity::class.java).apply {
                                             putExtra("id_tournoi", r.first)
                                             putExtra("type_tournoi", r.second)
                                             putExtra("nombre_equipes", r.third)
+                                            putExtra("mode_online", modeOnline)
+                                            putExtra("ip_serveur", ipServeur)
+                                            putParcelableArrayListExtra("equipes", ArrayList(equipesRecues))
+                                            putParcelableArrayListExtra("joueurs_restants", ArrayList(joueursRestantsRecus))
                                         }
-                                        setResult(RESULT_OK, resultIntent)
-                                        finish()
+                                        constitutionEtape3Launcher.launch(intentEtape3)
                                     }
                                 }
                             }) {
@@ -229,12 +308,22 @@ class CreationTournoiActivity : BaseActivity() {
 
                         Spacer(modifier = Modifier.height(20.dp))
 
+                        // Étape 2 : liste réellement affichée, filtrée selon le nombre
+                        // d'équipes déjà constitué.
+                        val optionsFiltrees = optionsTypes.value.filter { estCompatible(it, nbreEquipesConnu) }
+
                         if (isLoading.value) {
                             CircularProgressIndicator()
                             Text("Chargement des types de tournoi...")
                         } else if (optionsTypes.value.isEmpty()) {
                             Text(
                                 "❌ Aucun type de tournoi disponible",
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        } else if (optionsFiltrees.isEmpty()) {
+                            Text(
+                                "❌ Aucun type de tournoi ne correspond à $nbreEquipesConnu équipes.\n" +
+                                        "Revenez à la constitution des équipes pour ajuster le nombre.",
                                 color = MaterialTheme.colorScheme.error
                             )
                         } else {
@@ -260,7 +349,7 @@ class CreationTournoiActivity : BaseActivity() {
                                     expanded = expanded,
                                     onDismissRequest = { expanded = false }
                                 ) {
-                                    optionsTypes.value.forEach { option ->
+                                    optionsFiltrees.forEach { option ->
                                         DropdownMenuItem(
                                             text = { Text(option.texteAffichage) },
                                             onClick = { selectedOption = option; expanded = false },
@@ -400,16 +489,20 @@ class CreationTournoiActivity : BaseActivity() {
                                                     "CreationTournoiActivity",
                                                     "✅ Tournoi Mitchell créé ID=${resultat.idTournoi}"
                                                 )
-                                                val resultIntent = Intent().apply {
+                                                // Étape 3 : lance la revue des équipes (positions +
+                                                // enregistrement réel), le tournoi vient d'être créé.
+                                                val intentEtape3 = Intent(this@CreationTournoiActivity, ConstitutionEquipesActivity::class.java).apply {
                                                     putExtra("id_tournoi", resultat.idTournoi)
                                                     putExtra("type_tournoi", current.nomBrut)
                                                     // -1 = signal Mitchell : pas de limite d'équipes
                                                     putExtra("nombre_equipes", -1)
-                                                    // Transmis à ConstitutionEquipesActivity
                                                     putExtra("nbre_donnes_par_table", nbreDonnes)
+                                                    putExtra("mode_online", modeOnline)
+                                                    putExtra("ip_serveur", ipServeur)
+                                                    putParcelableArrayListExtra("equipes", ArrayList(equipesRecues))
+                                                    putParcelableArrayListExtra("joueurs_restants", ArrayList(joueursRestantsRecus))
                                                 }
-                                                setResult(RESULT_OK, resultIntent)
-                                                finish()
+                                                constitutionEtape3Launcher.launch(intentEtape3)
                                             } else if (resultat.avertissement != null) {
                                                 // Bloqué ou avertissement → afficher le message dans un dialog
                                                 messageAvertissement = resultat.avertissement
@@ -480,13 +573,18 @@ class CreationTournoiActivity : BaseActivity() {
                                                         "CreationTournoiActivity",
                                                         "✅ Tournoi Howell créé ID=${resultat.idTournoi}"
                                                     )
-                                                    val resultIntent = Intent().apply {
+                                                    // Étape 3 : lance la revue des équipes
+                                                    // (positions + enregistrement réel).
+                                                    val intentEtape3 = Intent(this@CreationTournoiActivity, ConstitutionEquipesActivity::class.java).apply {
                                                         putExtra("id_tournoi", resultat.idTournoi)
                                                         putExtra("type_tournoi", current.nomBrut)
                                                         putExtra("nombre_equipes", nbEquipes)
+                                                        putExtra("mode_online", modeOnline)
+                                                        putExtra("ip_serveur", ipServeur)
+                                                        putParcelableArrayListExtra("equipes", ArrayList(equipesRecues))
+                                                        putParcelableArrayListExtra("joueurs_restants", ArrayList(joueursRestantsRecus))
                                                     }
-                                                    setResult(RESULT_OK, resultIntent)
-                                                    finish()
+                                                    constitutionEtape3Launcher.launch(intentEtape3)
                                                 }
 
                                                 else -> {
