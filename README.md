@@ -1,4 +1,4 @@
-# Résultats Bridge V2 - Suite logique de Résultats Bridge
+# Résultats Bridge V3 - Suite logique de Résultats Bridge et améliorations de V2 + gestion des clubs de la fédération de Bridge
 
 Application complète pour organiser et gérer des tournois de bridge : constitution des équipes, suivi des mouvements, saisie des scores, calcul automatique du classement, consultation en ligne.
 
